@@ -1,7 +1,7 @@
-module LspRecorder.Env (
-    getOsInfo,
-    extractServerInfo,
-) where
+module LspRecorder.Env
+  ( getOsInfo
+  , extractServerInfo
+  ) where
 
 import Data.Aeson (decodeStrict)
 import Data.Aeson.Key qualified as Key
@@ -21,18 +21,18 @@ getOsInfo = pure $ T.pack SI.os <> "-" <> T.pack SI.arch
 -- Looks for: result.serverInfo.{name, version}
 extractServerInfo :: ByteString -> Maybe ServerInfo
 extractServerInfo bs = do
-    val <- decodeStrict bs
-    result <- lookupObj "result" val
-    siVal <- lookupObj "serverInfo" result
-    name <- lookupText "name" siVal
-    let version = lookupText "version" siVal
-    pure $ ServerInfo{serverInfoName = name, serverInfoVersion = version}
-  where
-    lookupObj :: Text -> Value -> Maybe Value
-    lookupObj k (Object o) = KM.lookup (Key.fromText k) o
-    lookupObj _ _ = Nothing
+  val <- decodeStrict bs
+  result <- lookupObj "result" val
+  siVal <- lookupObj "serverInfo" result
+  name <- lookupText "name" siVal
+  let version = lookupText "version" siVal
+  pure $ ServerInfo{serverInfoName = name, serverInfoVersion = version}
+ where
+  lookupObj :: Text -> Value -> Maybe Value
+  lookupObj k (Object o) = KM.lookup (Key.fromText k) o
+  lookupObj _ _ = Nothing
 
-    lookupText :: Text -> Value -> Maybe Text
-    lookupText k obj = case lookupObj k obj of
-        Just (String t) -> Just t
-        _ -> Nothing
+  lookupText :: Text -> Value -> Maybe Text
+  lookupText k obj = case lookupObj k obj of
+    Just (String t) -> Just t
+    _ -> Nothing

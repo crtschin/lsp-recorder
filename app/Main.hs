@@ -23,14 +23,16 @@ main = do
           , rcProjectRoot = roProjectRoot
           }
     CmdReplay ReplayOpts{rpTrace, rpServerCommand, rpTiming, rpReport} ->
-      let (strategy, modeName) = case rpTiming of
-            Immediate -> (immediateStrategy, "immediate")
-            Realistic -> (realisticStrategy, "realistic")
-       in runReplay
-            ReplayConfig
-              { rcTrace = rpTrace
-              , rcServerCommand = rpServerCommand
-              , rcTiming = strategy
-              , rcTimingModeName = modeName
-              , rcReportPath = rpReport
-              }
+      let
+        (strategy, modeName) = case rpTiming of
+          Immediate -> (immediateStrategy, "immediate")
+          Realistic -> (realisticStrategy, "realistic")
+       in
+        runReplay
+          ReplayConfig
+            { rcTrace = rpTrace
+            , rcServerCommand = rpServerCommand
+            , rcTiming = strategy
+            , rcTimingModeName = modeName
+            , rcReportPath = rpReport
+            }

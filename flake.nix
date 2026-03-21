@@ -6,12 +6,7 @@
     flake-utils.url = "github:numtide/flake-utils";
   };
 
-  outputs =
-    {
-      self,
-      nixpkgs,
-      flake-utils,
-    }:
+  outputs = { self, nixpkgs, flake-utils, }:
     let
       ghcVer = "ghc910";
       package = "lsp-recorder";
@@ -28,8 +23,7 @@
         };
       };
 
-      out =
-        system:
+      out = system:
         let
           pkgs = import nixpkgs {
             inherit system;
@@ -38,10 +32,8 @@
           };
 
           haskellPackages = pkgs.haskell.packages.${ghcVer};
-          devUtils =
-            with pkgs;
-            [ just ]
-            ++ (with haskellPackages; [
+          devUtils = with pkgs;
+            [ just ] ++ (with haskellPackages; [
               fourmolu
               haskell-language-server
               ghcid
@@ -50,38 +42,30 @@
             ]);
 
           commonDeps = [ haskellPackages.cabal-install ];
-        in
-        {
+        in {
           packages = {
             default = "${package}";
             ${package} = pkgs.haskell.packages.${ghcVer}.${package};
           };
 
           devShells.minimal = haskellPackages.shellFor {
-            packages = p: [
-              self.packages.${system}.${package}
-            ];
+            packages = p: [ self.packages.${system}.${package} ];
             withHoogle = false;
             buildInputs = commonDeps;
           };
 
           devShells.default = haskellPackages.shellFor {
-            packages = p: [
-              self.packages.${system}.${package}
-            ];
+            packages = p: [ self.packages.${system}.${package} ];
             withHoogle = false;
             buildInputs = devUtils ++ commonDeps;
           };
         };
-    in
-    flake-utils.lib.eachDefaultSystem out
-    // {
+    in flake-utils.lib.eachDefaultSystem out // {
       overlays = {
-        default = makeOverlay (
-          super: self: with self; {
+        default = makeOverlay (super: self:
+          with self; {
             ${package} = callCabal2nix "${package}" ./. { };
-          }
-        );
+          });
       };
     };
 }
