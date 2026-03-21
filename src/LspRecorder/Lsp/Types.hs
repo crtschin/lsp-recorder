@@ -69,11 +69,12 @@ data TraceHeader = TraceHeader
   , thProjectRoot :: FilePath
   , thServerInfo :: Maybe ServerInfo
   , thOs :: Text
+  , thSnapshotPath :: Maybe FilePath
   }
   deriving stock (Eq, Show)
 
 instance ToJSON TraceHeader where
-  toJSON TraceHeader{thTraceVersion, thRecordedAt, thServerCommand, thProjectRoot, thServerInfo, thOs} =
+  toJSON TraceHeader{thTraceVersion, thRecordedAt, thServerCommand, thProjectRoot, thServerInfo, thOs, thSnapshotPath} =
     object
       [ "trace_version" .= thTraceVersion
       , "recorded_at" .= thRecordedAt
@@ -81,6 +82,7 @@ instance ToJSON TraceHeader where
       , "project_root" .= thProjectRoot
       , "server_info" .= thServerInfo
       , "os" .= thOs
+      , "snapshot_path" .= thSnapshotPath
       ]
 
 instance FromJSON TraceHeader where
@@ -92,6 +94,7 @@ instance FromJSON TraceHeader where
       <*> o .: "project_root"
       <*> o .:? "server_info"
       <*> o .: "os"
+      <*> o .:? "snapshot_path"
 
 --------------------------------------------------------------------------------
 -- TraceMessage

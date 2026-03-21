@@ -25,6 +25,7 @@ library
   hs-source-dirs:  src
   exposed-modules:
     LspRecorder.Cli
+    LspRecorder.Config
     LspRecorder.Env
     LspRecorder.Lsp.Framing
     LspRecorder.Lsp.Types
@@ -34,21 +35,26 @@ library
     LspRecorder.Replay.Report
     LspRecorder.Replay.Timing
     LspRecorder.Server
+    LspRecorder.Snapshot
 
   build-depends:
-    , aeson                 >=2.1  && <2.3
-    , async                 >=2.2  && <2.3
-    , attoparsec            >=0.14 && <0.15
-    , base                  >=4.20 && <5
-    , bytestring            >=0.11 && <0.13
-    , containers            >=0.6  && <0.8
-    , directory             >=1.3  && <1.4
-    , optparse-applicative  >=0.17 && <0.19
-    , process               >=1.6  && <1.7
-    , stm                   >=2.5  && <2.6
-    , text                  >=2.0  && <2.2
-    , time                  >=1.12 && <1.15
-    , unix                  >=2.8  && <2.9
+    , aeson
+    , async
+    , attoparsec
+    , base
+    , bytestring
+    , containers
+    , directory
+    , filepattern
+    , filepath
+    , optparse-applicative
+    , process
+    , stm
+    , tar
+    , text
+    , time
+    , unix
+    , zstd
 
 executable lsp-recorder
   import:         shared
@@ -63,8 +69,12 @@ test-suite lsp-recorder-test
   type:           exitcode-stdio-1.0
   main-is:        Main.hs
   other-modules:
+    ConfigSpec
     FramingSpec
     RecordSpec
+    ReplaySpec
+    SnapshotSpec
+    TypesSpec
 
   hs-source-dirs: test
   build-depends:
@@ -72,8 +82,12 @@ test-suite lsp-recorder-test
     , attoparsec
     , base
     , bytestring
+    , containers
     , directory
-    , hspec         >=2.11 && <2.12
+    , filepath
+    , hspec
     , lsp-recorder
     , process
-    , QuickCheck    >=2.14 && <2.16
+    , QuickCheck
+    , text
+    , time

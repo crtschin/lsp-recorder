@@ -33,7 +33,7 @@
 
           haskellPackages = pkgs.haskell.packages.${ghcVer};
           devUtils = with pkgs;
-            [ just ] ++ (with haskellPackages; [
+            [ just zstd ] ++ (with haskellPackages; [
               fourmolu
               haskell-language-server
               ghcid

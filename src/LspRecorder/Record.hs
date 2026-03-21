@@ -1,6 +1,15 @@
+-- | The Record mode of lsp-recorder.
+--
+-- Sits as a transparent stdio proxy between an editor and a language server,
+-- capturing every LSP message into a timestamped JSONL trace file. The trace
+-- file begins with a 'TraceHeader' (line 1) followed by one 'TraceMessage' per
+-- LSP frame. After the session ends, the header is back-filled with
+-- 'ServerInfo' extracted from the server's @initialize@ response.
 module LspRecorder.Record
-  ( RecordConfig (..)
-  , runRecord
+  ( runRecord
+  , timestampUs
+  , decodePayload
+  , backfillHeader
   ) where
 
 import Control.Concurrent.Async (async, wait)
@@ -15,6 +24,7 @@ import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.Text qualified as T
 import Data.Time (UTCTime, getCurrentTime)
 import Data.Time.Clock.POSIX (utcTimeToPOSIXSeconds)
+import LspRecorder.Config (RecordConfig (..))
 import LspRecorder.Env (extractServerInfo, getOsInfo)
 import LspRecorder.Lsp.Types
   ( Direction (..)
@@ -25,6 +35,8 @@ import LspRecorder.Lsp.Types
   )
 import LspRecorder.Proxy (ProxyConfig (..), runProxy)
 import LspRecorder.Server (cleanupServer, spawnServer)
+import LspRecorder.Snapshot (takeSnapshot)
+import System.FilePath (replaceExtension, takeBaseName, takeDirectory, (</>))
 import System.IO
   ( BufferMode (..)
   , Handle
@@ -37,24 +49,38 @@ import System.IO
 import System.IO qualified as IO
 import System.Posix.Signals (Handler (..), installHandler, sigPIPE, sigTERM)
 
-data RecordConfig = RecordConfig
-  { rcServerCommand :: String
-  , rcTraceOut :: FilePath
-  , rcProjectRoot :: FilePath
-  }
-
+-- | Run a recording session.
+--
+-- 1. Spawns the language server as a subprocess.
+-- 2. Starts the bidirectional proxy ('runProxy') that forwards LSP frames
+--    between editor stdio and the server, teeing each message into a bounded
+--    STM queue.
+-- 3. A background logging thread drains the queue and writes 'TraceMessage'
+--    entries to the trace file.
+-- 4. On shutdown (proxy exits or exception), sends a @Nothing@ sentinel to
+--    stop the logging thread, then back-fills the trace header with
+--    'ServerInfo' if one was captured from the server's @initialize@ response.
 runRecord :: RecordConfig -> IO ()
-runRecord RecordConfig{rcServerCommand, rcTraceOut, rcProjectRoot} = do
+runRecord RecordConfig{rcServerCommand, rcTraceOut, rcProjectRoot, rcSnapshot} = do
   hSetBuffering stdin NoBuffering
   hSetBuffering stdout NoBuffering
 
   now <- getCurrentTime
   osInfo <- getOsInfo
 
+  -- Gracefully handle SIGTERM; ignore SIGPIPE so broken-pipe doesn't crash us.
   _ <- installHandler sigTERM (CatchOnce $ pure ()) Nothing
   _ <- installHandler sigPIPE Ignore Nothing
 
-  bracket (spawnServer rcServerCommand) cleanupServer $ \(serverIn, serverOut, _ph) -> do
+  -- Take project snapshot before starting the proxy, if configured.
+  mSnapshotPath <- case rcSnapshot of
+    Nothing -> pure Nothing
+    Just snapCfg -> do
+      let archivePath = snapshotArchivePath rcTraceOut
+      takeSnapshot snapCfg rcProjectRoot archivePath
+      pure (Just archivePath)
+
+  bracket (spawnServer Nothing rcServerCommand) cleanupServer $ \(serverIn, serverOut, _ph) -> do
     hSetBuffering serverIn NoBuffering
     hSetBuffering serverOut NoBuffering
 
@@ -69,6 +95,7 @@ runRecord RecordConfig{rcServerCommand, rcTraceOut, rcProjectRoot} = do
             , thProjectRoot = rcProjectRoot
             , thServerInfo = Nothing
             , thOs = osInfo
+            , thSnapshotPath = mSnapshotPath
             }
 
     bracket (IO.openFile rcTraceOut WriteMode) hClose $ \traceHandle -> do
@@ -87,14 +114,27 @@ runRecord RecordConfig{rcServerCommand, rcTraceOut, rcProjectRoot} = do
               }
       runProxy proxyCfg `catch` \(_ :: SomeException) -> pure ()
 
+      -- Signal the logging thread to drain and exit.
       atomically $ writeTBQueue queue Nothing
       wait logThread
 
+      -- Back-fill the trace header with server info if we captured it.
       mServerInfo <- readIORef serverInfoRef
       case mServerInfo of
         Nothing -> pure ()
         Just si -> backfillHeader rcTraceOut header{thServerInfo = Just si}
 
+-- | Derive the snapshot archive path from the trace file path.
+-- e.g. @"session.jsonl"@ → @"session.snapshot.tar.zst"@
+snapshotArchivePath :: FilePath -> FilePath
+snapshotArchivePath tracePath =
+  takeDirectory tracePath </> takeBaseName (replaceExtension tracePath "") <> ".snapshot.tar.zst"
+
+-- | Logging thread loop. Drains 'LogEntry' values from the bounded queue,
+-- converts each to a 'TraceMessage' with a monotonic sequence number, and
+-- writes it as a JSON line. Also watches server-to-client messages for the
+-- @initialize@ response so we can capture 'ServerInfo'. Terminates when it
+-- reads the @Nothing@ sentinel.
 runLoggingThread :: Handle -> TBQueue (Maybe LogEntry) -> IORef (Maybe ServerInfo) -> Int -> IO ()
 runLoggingThread traceHandle queue serverInfoRef seqNum = do
   mEntry <- atomically $ readTBQueue queue
@@ -124,14 +164,19 @@ runLoggingThread traceHandle queue serverInfoRef seqNum = do
         ClientToServer -> pure ()
       runLoggingThread traceHandle queue serverInfoRef (seqNum + 1)
 
+-- | Convert a 'UTCTime' to microseconds since the Unix epoch.
 timestampUs :: UTCTime -> Int
 timestampUs t = round $ utcTimeToPOSIXSeconds t * 1_000_000
 
+-- | Attempt to decode a raw LSP payload as JSON, falling back to 'Null'.
 decodePayload :: ByteString -> Value
 decodePayload bs = case decodeStrict bs of
   Just v -> v
   Nothing -> Null
 
+-- | Rewrite the first line of the trace file with an updated 'TraceHeader'.
+-- Used after the session ends to fill in 'ServerInfo' that wasn't available
+-- when the header was originally written.
 backfillHeader :: FilePath -> TraceHeader -> IO ()
 backfillHeader path newHeader = do
   contents <- BS.readFile path

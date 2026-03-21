@@ -11,9 +11,10 @@ import Options.Applicative
 data Command = CmdRecord RecordOpts | CmdReplay ReplayOpts
 
 data RecordOpts = RecordOpts
-  { roServerCommand :: String
-  , roTraceOut :: FilePath
-  , roProjectRoot :: FilePath
+  { roServerCommand :: Maybe String
+  , roTraceOut :: Maybe FilePath
+  , roProjectRoot :: Maybe FilePath
+  , roConfig :: Maybe FilePath
   }
 
 data TimingMode = Realistic | Immediate
@@ -24,6 +25,8 @@ data ReplayOpts = ReplayOpts
   , rpServerCommand :: String
   , rpTiming :: TimingMode
   , rpReport :: FilePath
+  , rpTimeout :: Int
+  , rpNoRestore :: Bool
   }
 
 parseCommand :: IO Command
@@ -41,20 +44,33 @@ commandParser =
 recordOpts :: Parser RecordOpts
 recordOpts =
   RecordOpts
-    <$> strOption
-      ( long "server-command"
-          <> metavar "CMD"
-          <> help "Shell command to launch the language server"
+    <$> optional
+      ( strOption
+          ( long "server-command"
+              <> metavar "CMD"
+              <> help "Shell command to launch the language server"
+          )
       )
-    <*> strOption
-      ( long "trace-out"
-          <> metavar "FILE"
-          <> help "Output path for the JSONL trace file"
+    <*> optional
+      ( strOption
+          ( long "trace-out"
+              <> metavar "FILE"
+              <> help "Output path for the JSONL trace file"
+          )
       )
-    <*> strOption
-      ( long "project-root"
-          <> metavar "DIR"
-          <> help "Project root directory"
+    <*> optional
+      ( strOption
+          ( long "project-root"
+              <> metavar "DIR"
+              <> help "Project root directory"
+          )
+      )
+    <*> optional
+      ( strOption
+          ( long "config"
+              <> metavar "FILE"
+              <> help "Path to a JSON config file (CLI flags override config file values)"
+          )
       )
 
 replayOpts :: Parser ReplayOpts
@@ -82,6 +98,18 @@ replayOpts =
       ( long "report"
           <> metavar "FILE"
           <> help "Output path for the JSON performance report"
+      )
+    <*> option
+      auto
+      ( long "timeout"
+          <> metavar "SECONDS"
+          <> value 60
+          <> showDefault
+          <> help "Per-request timeout in seconds (0 = no timeout)"
+      )
+    <*> switch
+      ( long "no-restore"
+          <> help "Skip snapshot extraction; run server in current working directory"
       )
 
 timingModeReader :: ReadM TimingMode

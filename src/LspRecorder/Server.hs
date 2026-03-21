@@ -17,9 +17,9 @@ import System.Process
   , waitForProcess
   )
 
-spawnServer :: String -> IO (Handle, Handle, ProcessHandle)
-spawnServer cmd = do
-  let cp = (shell cmd){std_in = CreatePipe, std_out = CreatePipe, std_err = Inherit}
+spawnServer :: Maybe FilePath -> String -> IO (Handle, Handle, ProcessHandle)
+spawnServer mcwd cmd = do
+  let cp = (shell cmd){std_in = CreatePipe, std_out = CreatePipe, std_err = Inherit, cwd = mcwd}
   (Just sIn, Just sOut, Nothing, ph) <- createProcess cp
   pure (sIn, sOut, ph)
 
@@ -30,5 +30,5 @@ cleanupServer (sIn, sOut, ph) = do
   hClose sIn `catch` \(_ :: SomeException) -> pure ()
   hClose sOut `catch` \(_ :: SomeException) -> pure ()
 
-withServer :: String -> ((Handle, Handle, ProcessHandle) -> IO a) -> IO a
-withServer cmd = bracket (spawnServer cmd) cleanupServer
+withServer :: Maybe FilePath -> String -> ((Handle, Handle, ProcessHandle) -> IO a) -> IO a
+withServer mcwd cmd = bracket (spawnServer mcwd cmd) cleanupServer

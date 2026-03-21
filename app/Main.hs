@@ -7,7 +7,12 @@ import LspRecorder.Cli
   , TimingMode (..)
   , parseCommand
   )
-import LspRecorder.Record (RecordConfig (..), runRecord)
+import LspRecorder.Config
+  ( RecordConfigFile (..)
+  , loadConfig
+  , mergeWithCli
+  )
+import LspRecorder.Record (runRecord)
 import LspRecorder.Replay (ReplayConfig (..), runReplay)
 import LspRecorder.Replay.Timing (immediateStrategy, realisticStrategy)
 
@@ -15,14 +20,21 @@ main :: IO ()
 main = do
   cmd <- parseCommand
   case cmd of
-    CmdRecord RecordOpts{roServerCommand, roTraceOut, roProjectRoot} ->
-      runRecord
-        RecordConfig
-          { rcServerCommand = roServerCommand
-          , rcTraceOut = roTraceOut
-          , rcProjectRoot = roProjectRoot
-          }
-    CmdReplay ReplayOpts{rpTrace, rpServerCommand, rpTiming, rpReport} ->
+    CmdRecord opts@RecordOpts{roConfig} -> do
+      fileCfg <- case roConfig of
+        Nothing ->
+          pure
+            RecordConfigFile
+              { cfServerCommand = Nothing
+              , cfTraceOut = Nothing
+              , cfProjectRoot = Nothing
+              , cfSnapshot = Nothing
+              }
+        Just path -> loadConfig path
+      case mergeWithCli fileCfg opts of
+        Left err -> fail err
+        Right cfg -> runRecord cfg
+    CmdReplay ReplayOpts{rpTrace, rpServerCommand, rpTiming, rpReport, rpTimeout, rpNoRestore} ->
       let
         (strategy, modeName) = case rpTiming of
           Immediate -> (immediateStrategy, "immediate")
@@ -35,4 +47,6 @@ main = do
             , rcTiming = strategy
             , rcTimingModeName = modeName
             , rcReportPath = rpReport
+            , rcTimeoutSeconds = rpTimeout
+            , rcNoRestore = rpNoRestore
             }
