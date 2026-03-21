@@ -1,0 +1,73 @@
+cabal-version:   3.8
+name:            lsp-recorder
+version:         0.1.0.0
+license:         MIT
+license-file:    LICENSE
+author:          Curtis Chin Jen Sem
+maintainer:      csochinjensem@gmail.com
+build-type:      Simple
+extra-doc-files: CHANGELOG.md
+synopsis:        Transparent LSP stdio proxy that records and replays editor↔server communication
+description:     lsp-recorder sits between an editor and a language server, recording all
+                 bidirectional LSP messages to JSONL trace files. Traces can be replayed
+                 against a fresh server to benchmark performance.
+
+common shared
+  default-language:   GHC2024
+  default-extensions: OverloadedStrings
+  ghc-options:        -Wall -Werror
+
+library
+  import:           shared
+  hs-source-dirs:   src
+  exposed-modules:
+    LspRecorder.Cli
+    LspRecorder.Env
+    LspRecorder.Lsp.Framing
+    LspRecorder.Lsp.Types
+    LspRecorder.Proxy
+    LspRecorder.Record
+    LspRecorder.Replay
+    LspRecorder.Server
+    LspRecorder.Replay.Report
+    LspRecorder.Replay.Timing
+  build-depends:
+    , aeson                >=2.1  && <2.3
+    , attoparsec           >=0.14 && <0.15
+    , async                >=2.2  && <2.3
+    , base                 >=4.20 && <5
+    , bytestring           >=0.11 && <0.13
+    , containers           >=0.6  && <0.8
+    , directory            >=1.3  && <1.4
+    , optparse-applicative >=0.17 && <0.19
+    , process              >=1.6  && <1.7
+    , stm                  >=2.5  && <2.6
+    , text                 >=2.0  && <2.2
+    , time                 >=1.12 && <1.15
+    , unix                 >=2.8  && <2.9
+
+executable lsp-recorder
+  import:         shared
+  main-is:        Main.hs
+  hs-source-dirs: app
+  build-depends:
+    , base
+    , lsp-recorder
+
+test-suite lsp-recorder-test
+  import:          shared
+  type:            exitcode-stdio-1.0
+  main-is:         Main.hs
+  other-modules:   FramingSpec
+                   RecordSpec
+  hs-source-dirs:  test
+  build-depends:
+    , aeson
+    , attoparsec
+    , base
+    , bytestring
+    , directory
+    , hspec            >=2.11 && <2.12
+    , lsp-recorder
+    , process
+    , QuickCheck       >=2.14 && <2.16
