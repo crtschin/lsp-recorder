@@ -22,6 +22,8 @@ import System.IO
   , hFlush
   , hSetBuffering
   )
+import System.IO.Unsafe (unsafePerformIO)
+import System.OsPath (OsPath, encodeFS)
 import System.Process
   ( CreateProcess (..)
   , StdStream (..)
@@ -31,11 +33,15 @@ import System.Process
   )
 import Test.Hspec (Spec, around_, describe, it, shouldBe, shouldSatisfy)
 
-traceFile :: FilePath
-traceFile = "/tmp/lsp-recorder-test.jsonl"
+traceFileStr :: FilePath
+traceFileStr = "/tmp/lsp-recorder-test.jsonl"
+
+{-# NOINLINE traceFile #-}
+traceFile :: OsPath
+traceFile = unsafePerformIO $ encodeFS traceFileStr
 
 withTraceFile :: IO () -> IO ()
-withTraceFile action = action `finally` removeFile traceFile
+withTraceFile action = action `finally` removeFile traceFileStr
 
 -- | A fixed epoch time for timestampUs tests.
 epochTime :: UTCTime
@@ -55,7 +61,7 @@ runRecordCat frames = do
           , "--server-command"
           , "cat"
           , "--trace-out"
-          , traceFile
+          , traceFileStr
           , "--project-root"
           , "/tmp"
           ]
@@ -107,13 +113,13 @@ spec = do
               }
           msgLine = BC.pack "{\"seq\":0,\"msg\":\"hello\"}"
 
-      BC.writeFile traceFile $
+      BC.writeFile traceFileStr $
         BL.toStrict (encode header) <> "\n" <> msgLine <> "\n"
 
       let updatedHeader = header{thServerInfo = Just ServerInfo{serverInfoName = "myls", serverInfoVersion = Just "1.0"}}
       backfillHeader traceFile updatedHeader
 
-      contents <- BC.readFile traceFile
+      contents <- BC.readFile traceFileStr
       case BC.lines contents of
         (firstLine : secondLine : _) -> do
           case decodeStrict firstLine of
@@ -154,7 +160,7 @@ spec = do
       let lspPayload = "{\"jsonrpc\":\"2.0\",\"method\":\"initialized\",\"params\":{}}"
       runRecordCat (encodeFrame (BC.pack lspPayload))
 
-      contents <- BC.readFile traceFile
+      contents <- BC.readFile traceFileStr
       case BC.lines contents of
         (headerLine : msgLine : _) -> do
           case decodeStrict headerLine of
@@ -179,7 +185,7 @@ spec = do
                 <> ",\"method\":\"textDocument/hover\",\"params\":{}}"
       runRecordCat (mconcat [encodeFrame (mkPayload i) | i <- [1 .. 3]])
 
-      contents <- BC.readFile traceFile
+      contents <- BC.readFile traceFileStr
       let ls = BC.lines contents
       -- header + 3 client→server msgs + 3 server→client echoes (cat echoes back)
       length ls `shouldSatisfy` (>= 7)

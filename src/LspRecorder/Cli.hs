@@ -27,6 +27,7 @@ data ReplayOpts = ReplayOpts
   , rpReport :: FilePath
   , rpTimeout :: Int
   , rpNoRestore :: Bool
+  , rpNoFileSync :: Bool
   }
 
 parseCommand :: IO Command
@@ -110,6 +111,10 @@ replayOpts =
     <*> switch
       ( long "no-restore"
           <> help "Skip snapshot extraction; run server in current working directory"
+      )
+    <*> switch
+      ( long "no-file-sync"
+          <> help "Skip applying file changes to disk during replay"
       )
 
 timingModeReader :: ReadM TimingMode

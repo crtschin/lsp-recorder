@@ -12,6 +12,7 @@ import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
 import Data.Text (Text)
 import System.IO (IOMode (..), withFile)
+import System.OsPath (OsPath, decodeFS)
 
 data MethodStats = MethodStats
   { msCount :: Int
@@ -75,7 +76,8 @@ generateReport pairs =
         let idx = max 0 (min (n - 1) (ceiling (fromIntegral n * fromIntegral pct / 100.0 :: Double) - 1))
          in sorted !! idx
 
-writeReport :: FilePath -> ReplayReport -> IO ()
-writeReport path report =
-  withFile path WriteMode $ \h ->
+writeReport :: OsPath -> ReplayReport -> IO ()
+writeReport path report = do
+  pathStr <- decodeFS path
+  withFile pathStr WriteMode $ \h ->
     BL.hPutStr h (encode report)

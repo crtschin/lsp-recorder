@@ -68,16 +68,23 @@ import Data.Text.Encoding qualified as TE
 import Data.Time (UTCTime, diffUTCTime, getCurrentTime)
 import LspRecorder.Lsp.Framing (encodeFrame, readFramedMessages)
 import LspRecorder.Lsp.Types (Direction (..), TraceHeader (..), TraceMessage (..))
+import LspRecorder.Replay.FileSync (DocState, applyFileEffect, newDocState)
 import LspRecorder.Replay.Report (ReplayReport (..), generateReport, writeReport)
 import LspRecorder.Replay.Timing (TimingStrategy (..))
 import LspRecorder.Server (cleanupServer, spawnServer)
 import LspRecorder.Snapshot (restoreSnapshot)
-import System.Directory (createDirectoryIfMissing, getTemporaryDirectory, removeDirectoryRecursive, removeFile)
+import System.Directory.OsPath
+  ( createDirectoryIfMissing
+  , getTemporaryDirectory
+  , removeDirectoryRecursive
+  , removeFile
+  )
 import System.IO (BufferMode (..), Handle, hClose, hPutStrLn, hSetBuffering, openTempFile, stderr)
+import System.OsPath (OsPath, decodeFS, encodeFS)
 
 -- | Configuration for a replay session.
 data ReplayConfig = ReplayConfig
-  { rcTrace :: FilePath
+  { rcTrace :: OsPath
   -- ^ Path to the JSONL trace file produced by a previous recording session.
   , rcServerCommand :: String
   -- ^ Shell command used to launch the language server under test.
@@ -85,12 +92,14 @@ data ReplayConfig = ReplayConfig
   -- ^ Controls inter-message delays during replay.
   , rcTimingModeName :: Text
   -- ^ Human-readable name of the timing mode, written into the report.
-  , rcReportPath :: FilePath
+  , rcReportPath :: OsPath
   -- ^ Path where the JSON latency report will be written.
   , rcTimeoutSeconds :: Int
   -- ^ Per-request timeout in seconds. 0 means no timeout.
   , rcNoRestore :: Bool
   -- ^ When 'True', skip snapshot extraction even if the trace has one.
+  , rcNoFileSync :: Bool
+  -- ^ When 'True', skip applying file changes to disk during replay.
   }
 
 -- | In-flight requests awaiting a server response.
@@ -113,17 +122,25 @@ type PendingMap = Map Text (Text, TMVar UTCTime)
 --    handles and the reader thread.
 -- 7. Writes the latency report to 'rcReportPath'.
 runReplay :: ReplayConfig -> IO ()
-runReplay ReplayConfig{rcTrace, rcServerCommand, rcTiming, rcTimingModeName, rcReportPath, rcTimeoutSeconds, rcNoRestore} = do
+runReplay ReplayConfig{rcTrace, rcServerCommand, rcTiming, rcTimingModeName, rcReportPath, rcTimeoutSeconds, rcNoRestore, rcNoFileSync} = do
   (header, messages) <- parseTrace rcTrace
 
   let clientMsgs = filter (\m -> tmDirection m == ClientToServer) messages
-      mSnapshotPath = if rcNoRestore then Nothing else thSnapshotPath header
+      mSnapshotStr = if rcNoRestore then Nothing else thSnapshotPath header
+
+  mSnapshotPath <- traverse encodeFS mSnapshotStr
+  oldRoot <- encodeFS (thProjectRoot header)
 
   pendingRef <- newTVarIO (Map.empty :: PendingMap)
   latenciesRef <- newTVarIO ([] :: [(Text, Double)])
   timeoutsRef <- newTVarIO (0 :: Int)
 
-  withMaybeSnapshot mSnapshotPath (thProjectRoot header) $ \(mcwd, rewriter) ->
+  mDocState <-
+    if rcNoFileSync || rcNoRestore
+      then pure Nothing
+      else Just <$> newDocState
+
+  withMaybeSnapshot mSnapshotPath oldRoot $ \(mcwd, rewriter) ->
     bracket (spawnServer mcwd rcServerCommand) cleanupServer $ \(serverIn, serverOut, _ph) -> do
       hSetBuffering serverIn NoBuffering
       hSetBuffering serverOut NoBuffering
@@ -135,7 +152,7 @@ runReplay ReplayConfig{rcTrace, rcServerCommand, rcTiming, rcTimingModeName, rcR
           readFramedMessages serverOut (resolveResponse pendingRef)
             `catch` \(_ :: SomeException) -> pure ()
 
-      asyncHandles <- replayMessages serverIn clientMsgs rcTiming pendingRef latenciesRef timeoutsRef rcTimeoutSeconds rewriter
+      asyncHandles <- replayMessages serverIn clientMsgs rcTiming pendingRef latenciesRef timeoutsRef rcTimeoutSeconds rewriter mDocState
 
       threadDelay 1_000_000
 
@@ -147,9 +164,10 @@ runReplay ReplayConfig{rcTrace, rcServerCommand, rcTiming, rcTimingModeName, rcR
 
       latencies <- readTVarIO latenciesRef
       timedOut <- readTVarIO timeoutsRef
+      rrTraceStr <- decodeFS rcTrace
       let report =
             ReplayReport
-              { rrTrace = rcTrace
+              { rrTrace = rrTraceStr
               , rrTimingMode = rcTimingModeName
               , rrTotalDurationMs = totalMs
               , rrTimedOut = timedOut
@@ -162,27 +180,32 @@ runReplay ReplayConfig{rcTrace, rcServerCommand, rcTiming, rcTimingModeName, rcR
 -- and run the action with that directory as cwd and a path-rewriting function.
 -- If 'Nothing', run the action immediately with no cwd override and identity rewriter.
 withMaybeSnapshot
-  :: Maybe FilePath
-  -> FilePath
-  -> ((Maybe FilePath, ByteString -> ByteString) -> IO a)
+  :: Maybe OsPath
+  -> OsPath
+  -> ((Maybe OsPath, ByteString -> ByteString) -> IO a)
   -> IO a
 withMaybeSnapshot Nothing _ action = action (Nothing, id)
 withMaybeSnapshot (Just archivePath) oldRoot action =
-  withSnapshotRestore archivePath $ \tmpDir ->
-    action (Just tmpDir, rewritePayload (BC.pack oldRoot) (BC.pack tmpDir))
+  withSnapshotRestore archivePath $ \tmpDir -> do
+    oldRootStr <- decodeFS oldRoot
+    tmpDirStr <- decodeFS tmpDir
+    action (Just tmpDir, rewritePayload (BC.pack oldRootStr) (BC.pack tmpDirStr))
 
 -- | Create a temporary directory, extract @archivePath@ into it, run the
 -- action, then remove the directory on exit (even on exception).
-withSnapshotRestore :: FilePath -> (FilePath -> IO a) -> IO a
+withSnapshotRestore :: OsPath -> (OsPath -> IO a) -> IO a
 withSnapshotRestore archivePath action =
   bracket acquire cleanup action
  where
   acquire = do
     base <- getTemporaryDirectory
-    (tmpFile, h) <- openTempFile base "lsp-recorder-snapshot"
+    baseStr <- decodeFS base
+    (tmpFileStr, h) <- openTempFile baseStr "lsp-recorder-snapshot"
     hClose h
+    tmpFile <- encodeFS tmpFileStr
     removeFile tmpFile
-    let dir = tmpFile <> ".d"
+    dotD <- encodeFS ".d"
+    let dir = tmpFile <> dotD
     createDirectoryIfMissing True dir
     restoreSnapshot archivePath dir
     pure dir
@@ -218,8 +241,9 @@ replayMessages
   -> TVar Int
   -> Int
   -> (ByteString -> ByteString)
+  -> Maybe DocState
   -> IO [Async ()]
-replayMessages serverIn msgs timing pendingRef latenciesRef timeoutsRef timeoutSeconds rewriter = go msgs 0 []
+replayMessages serverIn msgs timing pendingRef latenciesRef timeoutsRef timeoutSeconds rewriter mDocState = go msgs 0 []
  where
   go [] _ acc = pure acc
   go (m : rest) prevUs acc = do
@@ -260,6 +284,9 @@ replayMessages serverIn msgs timing pendingRef latenciesRef timeoutsRef timeoutS
                   <> ")"
         pure (h : acc)
       _ -> do
+        case (mDocState, decodeStrict payload) of
+          (Just ds, Just val) -> applyFileEffect ds val
+          _ -> pure ()
         BS.hPut serverIn (encodeFrame payload)
         pure acc
 
@@ -294,9 +321,10 @@ resolveResponse pendingRef payload =
 -- tolerant of truncated or partially-written traces.
 --
 -- Fails (via 'fail') if the file is empty or the header line cannot be parsed.
-parseTrace :: FilePath -> IO (TraceHeader, [TraceMessage])
+parseTrace :: OsPath -> IO (TraceHeader, [TraceMessage])
 parseTrace path = do
-  contents <- BC.readFile path
+  pathStr <- decodeFS path
+  contents <- BC.readFile pathStr
   let ls = BC.lines contents
   case ls of
     [] -> fail "Empty trace file"

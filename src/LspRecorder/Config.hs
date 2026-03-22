@@ -22,6 +22,8 @@ import Data.Aeson
 import Data.ByteString.Lazy qualified as BL
 import Data.Aeson qualified as Aeson
 import LspRecorder.Cli (RecordOpts (..))
+import System.OsPath (OsPath, decodeFS, encodeFS)
+import System.Directory.OsPath (makeAbsolute)
 
 --------------------------------------------------------------------------------
 -- SnapshotConfig
@@ -80,40 +82,43 @@ instance FromJSON RecordConfigFile where
 -- | The merged, validated record configuration used by 'runRecord'.
 data RecordConfig = RecordConfig
   { rcServerCommand :: String
-  , rcTraceOut :: FilePath
-  , rcProjectRoot :: FilePath
+  , rcTraceOut :: OsPath
+  , rcProjectRoot :: OsPath
   , rcSnapshot :: Maybe SnapshotConfig
   }
   deriving stock (Eq, Show)
 
 -- | Load a 'RecordConfigFile' from a JSON file.
-loadConfig :: FilePath -> IO RecordConfigFile
+loadConfig :: OsPath -> IO RecordConfigFile
 loadConfig path = do
-  bs <- BL.readFile path
+  pathStr <- decodeFS path
+  bs <- BL.readFile pathStr
   case Aeson.eitherDecode bs of
-    Left err -> fail $ "Failed to parse config file " <> path <> ": " <> err
+    Left err -> fail $ "Failed to parse config file " <> pathStr <> ": " <> err
     Right cfg -> pure cfg
 
 -- | Merge a 'RecordConfigFile' with CLI opts, with CLI taking precedence.
+-- Resolves all paths to absolute paths before storing them.
 -- Returns 'Left' with an error message if any required field is absent after
 -- merging.
-mergeWithCli :: RecordConfigFile -> RecordOpts -> Either String RecordConfig
+mergeWithCli :: RecordConfigFile -> RecordOpts -> IO (Either String RecordConfig)
 mergeWithCli cfg RecordOpts{roServerCommand, roTraceOut, roProjectRoot, roConfig = _} = do
-  serverCommand <- require "server_command / --server-command" roServerCommand (cfServerCommand cfg)
-  traceOut <- require "trace_out / --trace-out" roTraceOut (cfTraceOut cfg)
-  projectRoot <- require "project_root / --project-root" roProjectRoot (cfProjectRoot cfg)
-  pure
-    RecordConfig
-      { rcServerCommand = serverCommand
-      , rcTraceOut = traceOut
-      , rcProjectRoot = projectRoot
-      , rcSnapshot = cfSnapshot cfg
-      }
-  where
-    require :: String -> Maybe a -> Maybe a -> Either String a
-    require field cli file = case cli <|> file of
-      Just v -> Right v
-      Nothing -> Left $ "Missing required field: " <> field
-    (<|>) = pickFirst
-    pickFirst (Just x) _ = Just x
-    pickFirst Nothing y = y
+  let serverCommand = roServerCommand `pickFirst` cfServerCommand cfg
+      traceOutStr = roTraceOut `pickFirst` cfTraceOut cfg
+      projectRootStr = roProjectRoot `pickFirst` cfProjectRoot cfg
+  case (serverCommand, traceOutStr, projectRootStr) of
+    (Nothing, _, _) -> pure $ Left "Missing required field: server_command / --server-command"
+    (_, Nothing, _) -> pure $ Left "Missing required field: trace_out / --trace-out"
+    (_, _, Nothing) -> pure $ Left "Missing required field: project_root / --project-root"
+    (Just sc, Just to, Just pr) -> do
+      traceOut <- encodeFS to >>= makeAbsolute
+      projectRoot <- encodeFS pr >>= makeAbsolute
+      pure $ Right RecordConfig
+        { rcServerCommand = sc
+        , rcTraceOut = traceOut
+        , rcProjectRoot = projectRoot
+        , rcSnapshot = cfSnapshot cfg
+        }
+ where
+  pickFirst (Just x) _ = Just x
+  pickFirst Nothing y = y

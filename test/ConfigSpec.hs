@@ -8,7 +8,14 @@ import LspRecorder.Config
   , SnapshotConfig (..)
   , mergeWithCli
   )
+import System.IO.Unsafe (unsafePerformIO)
+import System.OsPath (OsPath, encodeFS)
 import Test.Hspec (Spec, describe, it, shouldBe, shouldSatisfy)
+
+-- | Encode a known-good ASCII absolute path to OsPath (safe for test constants).
+{-# NOINLINE toOsPath #-}
+toOsPath :: String -> OsPath
+toOsPath s = unsafePerformIO $ encodeFS s
 
 emptyFile :: RecordConfigFile
 emptyFile =
@@ -28,11 +35,12 @@ emptyOpts =
     , roConfig = Nothing
     }
 
+-- Use absolute paths so makeAbsolute is a no-op and comparisons are stable.
 fullFile :: RecordConfigFile
 fullFile =
   RecordConfigFile
     { cfServerCommand = Just "hls --lsp"
-    , cfTraceOut = Just "session.jsonl"
+    , cfTraceOut = Just "/tmp/session.jsonl"
     , cfProjectRoot = Just "/tmp/proj"
     , cfSnapshot =
         Just
@@ -62,37 +70,42 @@ spec = describe "Config" $ do
 
   describe "mergeWithCli" $ do
     it "succeeds when all required fields come from file" $ do
-      let result = mergeWithCli fullFile emptyOpts
+      result <- mergeWithCli fullFile emptyOpts
       case result of
         Left err -> fail err
         Right cfg -> do
           rcServerCommand cfg `shouldBe` "hls --lsp"
-          rcTraceOut cfg `shouldBe` "session.jsonl"
-          rcProjectRoot cfg `shouldBe` "/tmp/proj"
+          rcTraceOut cfg `shouldBe` toOsPath "/tmp/session.jsonl"
+          rcProjectRoot cfg `shouldBe` toOsPath "/tmp/proj"
 
     it "CLI flags override file values" $ do
-      let opts = emptyOpts{roServerCommand = Just "my-lsp", roTraceOut = Just "out.jsonl", roProjectRoot = Just "/my/proj"}
-      case mergeWithCli fullFile opts of
+      let opts = emptyOpts{roServerCommand = Just "my-lsp", roTraceOut = Just "/tmp/out.jsonl", roProjectRoot = Just "/my/proj"}
+      result <- mergeWithCli fullFile opts
+      case result of
         Left err -> fail err
         Right cfg -> do
           rcServerCommand cfg `shouldBe` "my-lsp"
-          rcTraceOut cfg `shouldBe` "out.jsonl"
-          rcProjectRoot cfg `shouldBe` "/my/proj"
+          rcTraceOut cfg `shouldBe` toOsPath "/tmp/out.jsonl"
+          rcProjectRoot cfg `shouldBe` toOsPath "/my/proj"
 
     it "fails when server-command is missing" $ do
-      let file = emptyFile{cfTraceOut = Just "t.jsonl", cfProjectRoot = Just "/p"}
-      mergeWithCli file emptyOpts `shouldSatisfy` isLeft
+      let file = emptyFile{cfTraceOut = Just "/tmp/t.jsonl", cfProjectRoot = Just "/p"}
+      result <- mergeWithCli file emptyOpts
+      result `shouldSatisfy` isLeft
 
     it "fails when trace-out is missing" $ do
       let file = emptyFile{cfServerCommand = Just "hls", cfProjectRoot = Just "/p"}
-      mergeWithCli file emptyOpts `shouldSatisfy` isLeft
+      result <- mergeWithCli file emptyOpts
+      result `shouldSatisfy` isLeft
 
     it "fails when project-root is missing" $ do
-      let file = emptyFile{cfServerCommand = Just "hls", cfTraceOut = Just "t.jsonl"}
-      mergeWithCli file emptyOpts `shouldSatisfy` isLeft
+      let file = emptyFile{cfServerCommand = Just "hls", cfTraceOut = Just "/tmp/t.jsonl"}
+      result <- mergeWithCli file emptyOpts
+      result `shouldSatisfy` isLeft
 
     it "carries snapshot config from file" $ do
-      case mergeWithCli fullFile emptyOpts of
+      result <- mergeWithCli fullFile emptyOpts
+      case result of
         Left err -> fail err
         Right cfg -> rcSnapshot cfg `shouldBe` cfSnapshot fullFile
 

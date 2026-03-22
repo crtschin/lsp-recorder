@@ -32,6 +32,7 @@ library
     LspRecorder.Proxy
     LspRecorder.Record
     LspRecorder.Replay
+    LspRecorder.Replay.FileSync
     LspRecorder.Replay.Report
     LspRecorder.Replay.Timing
     LspRecorder.Server
@@ -44,14 +45,15 @@ library
     , base
     , bytestring
     , containers
-    , directory
+    , directory         >= 1.3.8.0
     , filepattern
-    , filepath
+    , filepath          >= 1.4.100.0
     , optparse-applicative
     , process
     , stm
     , tar
     , text
+    , text-rope
     , time
     , unix
     , zstd
@@ -62,6 +64,8 @@ executable lsp-recorder
   hs-source-dirs: app
   build-depends:
     , base
+    , directory         >= 1.3.8.0
+    , filepath          >= 1.4.100.0
     , lsp-recorder
 
 test-suite lsp-recorder-test
@@ -70,6 +74,7 @@ test-suite lsp-recorder-test
   main-is:        Main.hs
   other-modules:
     ConfigSpec
+    FileSyncSpec
     FramingSpec
     RecordSpec
     ReplaySpec
@@ -90,4 +95,5 @@ test-suite lsp-recorder-test
     , process
     , QuickCheck
     , text
+    , text-rope
     , time

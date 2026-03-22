@@ -12,7 +12,7 @@ import Data.ByteString qualified as BS
 import Data.Time (getCurrentTime)
 import LspRecorder.Lsp.Framing (singleFrameParser)
 import LspRecorder.Lsp.Types (Direction (..), LogEntry (..))
-import System.IO (Handle, hClose)
+import System.IO (Handle, hClose, hPutStrLn, stderr)
 
 data ProxyConfig = ProxyConfig
   { pcServerIn :: Handle
@@ -39,15 +39,19 @@ forwardAndTee src dst direction queue = loop (AP.parse singleFrameParser BS.empt
   loop partial = do
     chunk <- BS.hGetSome src chunkSize
     if BS.null chunk
-      then hClose dst `catch` \(_ :: SomeException) -> pure () -- EOF: signal downstream
+      then do
+        hPutStrLn stderr $ "[lsp-recorder] EOF on " <> show direction <> " channel"
+        hClose dst `catch` \(e :: SomeException) ->
+          hPutStrLn stderr $ "[lsp-recorder] hClose error (" <> show direction <> "): " <> show e
       else do
         BS.hPut dst chunk
         feedChunk chunk partial
 
   feedChunk chunk partial =
     case AP.feed partial chunk of
-      AP.Fail{} ->
+      AP.Fail _ _ failMsg -> do
         -- Parse error: reset parser and continue forwarding
+        hPutStrLn stderr $ "[lsp-recorder] parse error (" <> show direction <> "): " <> failMsg
         loop (AP.parse singleFrameParser BS.empty)
       AP.Partial cont ->
         loop (AP.Partial cont)

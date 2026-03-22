@@ -14,6 +14,8 @@ import System.Directory (removeFile)
 import System.IO (BufferMode (..), hSetBuffering)
 import System.IO qualified as IO
 import System.IO.Error (isUserError)
+import System.IO.Unsafe (unsafePerformIO)
+import System.OsPath (OsPath, encodeFS)
 import Test.Hspec (Spec, describe, it, shouldBe, shouldSatisfy)
 import Test.Hspec.QuickCheck (prop)
 import Test.QuickCheck (NonNegative (..))
@@ -22,15 +24,21 @@ import Test.QuickCheck (NonNegative (..))
 testTime :: UTCTime
 testTime = posixSecondsToUTCTime 0
 
+tracePathStr :: FilePath
+tracePathStr = "/tmp/lsp-recorder-replay-spec.jsonl"
+
+{-# NOINLINE tracePath #-}
+tracePath :: OsPath
+tracePath = unsafePerformIO $ encodeFS tracePathStr
+
 -- | Write lines to a temp file, run action, remove the file.
-withTempTrace :: [BL.ByteString] -> (FilePath -> IO ()) -> IO ()
+withTempTrace :: [BL.ByteString] -> IO () -> IO ()
 withTempTrace ls action = do
-  let path = "/tmp/lsp-recorder-replay-spec.jsonl"
-  IO.withFile path IO.WriteMode $ \h -> do
+  IO.withFile tracePathStr IO.WriteMode $ \h -> do
     hSetBuffering h (BlockBuffering Nothing)
     mapM_ (BL.hPutStr h . (<> "\n")) ls
-  action path `catch` (\e -> removeFile path >> ioError e)
-  removeFile path
+  action `catch` (\e -> removeFile tracePathStr >> ioError e)
+  removeFile tracePathStr
 
 -- | Encode a minimal valid TraceHeader line.
 minimalHeaderLine :: BL.ByteString
@@ -173,19 +181,19 @@ spec = do
 
   describe "parseTrace" $ do
     it "parses valid header + messages" $ do
-      withTempTrace [minimalHeaderLine, msgLine 0 ClientToServer, msgLine 1 ServerToClient] $ \path -> do
-        (header, msgs) <- parseTrace path
+      withTempTrace [minimalHeaderLine, msgLine 0 ClientToServer, msgLine 1 ServerToClient] $ do
+        (header, msgs) <- parseTrace tracePath
         thTraceVersion header `shouldBe` 1
         length msgs `shouldBe` 2
 
     it "fails on empty file" $ do
-      withTempTrace [] $ \path -> do
-        result <- try (parseTrace path) :: IO (Either IOError (TraceHeader, [TraceMessage]))
+      withTempTrace [] $ do
+        result <- try (parseTrace tracePath) :: IO (Either IOError (TraceHeader, [TraceMessage]))
         result `shouldSatisfy` \case
           Left e -> isUserError e
           Right _ -> False
 
     it "skips unparseable lines without failing" $ do
-      withTempTrace [minimalHeaderLine, "not valid json at all", msgLine 0 ClientToServer] $ \path -> do
-        (_header, msgs) <- parseTrace path
+      withTempTrace [minimalHeaderLine, "not valid json at all", msgLine 0 ClientToServer] $ do
+        (_header, msgs) <- parseTrace tracePath
         length msgs `shouldBe` 1
