@@ -1,0 +1,21 @@
+{
+  "server_command": "haskell-language-server-wrapper --lsp",
+  "trace_out": "hls-trace.jsonl",
+  "project_root": "/path/to/your/haskell/project",
+  "snapshot": {
+    "include": [
+      "**/*.hs",
+      "**/*.cabal",
+      "cabal.project",
+      "cabal.project.local",
+      "stack.yaml",
+      "hie.yaml",
+      "*.yaml"
+    ],
+    "exclude": [
+      "dist-newstyle/**",
+      ".stack-work/**",
+      ".git/**"
+    ]
+  }
+}
