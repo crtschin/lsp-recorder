@@ -5,6 +5,7 @@
 -- required fields must be supplied via CLI flags.
 module LspRecorder.Config
   ( SnapshotConfig (..)
+  , ExportConfig (..)
   , RecordConfigFile (..)
   , RecordConfig (..)
   , loadConfig
@@ -50,6 +51,33 @@ instance FromJSON SnapshotConfig where
       <*> o .:? "exclude" Aeson..!= []
 
 --------------------------------------------------------------------------------
+-- ExportConfig
+
+-- | Configuration for exporting server-emitted files after a replay session.
+-- Globs are matched against file names in the server's working directory.
+data ExportConfig = ExportConfig
+  { ecGlobs :: [String]
+  -- ^ Glob patterns for files to copy (matched against names in server cwd).
+  , ecDestination :: Maybe FilePath
+  -- ^ Directory to copy matching files into. When absent, defaults to the
+  -- working directory of the lsp-recorder process at startup.
+  }
+  deriving stock (Eq, Show)
+
+instance ToJSON ExportConfig where
+  toJSON ExportConfig{ecGlobs, ecDestination} =
+    object
+      [ "globs" .= ecGlobs
+      , "destination" .= ecDestination
+      ]
+
+instance FromJSON ExportConfig where
+  parseJSON = withObject "ExportConfig" $ \o ->
+    ExportConfig
+      <$> o .:? "globs" Aeson..!= []
+      <*> o .:? "destination"
+
+--------------------------------------------------------------------------------
 -- RecordConfigFile
 
 -- | Representation of a JSON config file. All fields are optional; required
@@ -59,16 +87,18 @@ data RecordConfigFile = RecordConfigFile
   , cfTraceOut :: Maybe FilePath
   , cfProjectRoot :: Maybe FilePath
   , cfSnapshot :: Maybe SnapshotConfig
+  , cfExport :: Maybe ExportConfig
   }
   deriving stock (Eq, Show)
 
 instance ToJSON RecordConfigFile where
-  toJSON RecordConfigFile{cfServerCommand, cfTraceOut, cfProjectRoot, cfSnapshot} =
+  toJSON RecordConfigFile{cfServerCommand, cfTraceOut, cfProjectRoot, cfSnapshot, cfExport} =
     object
       [ "server_command" .= cfServerCommand
       , "trace_out" .= cfTraceOut
       , "project_root" .= cfProjectRoot
       , "snapshot" .= cfSnapshot
+      , "export" .= cfExport
       ]
 
 instance FromJSON RecordConfigFile where
@@ -78,6 +108,7 @@ instance FromJSON RecordConfigFile where
       <*> o .:? "trace_out"
       <*> o .:? "project_root"
       <*> o .:? "snapshot"
+      <*> o .:? "export"
 
 -- | The merged, validated record configuration used by 'runRecord'.
 data RecordConfig = RecordConfig
@@ -85,6 +116,7 @@ data RecordConfig = RecordConfig
   , rcTraceOut :: OsPath
   , rcProjectRoot :: OsPath
   , rcSnapshot :: Maybe SnapshotConfig
+  , rcExport :: Maybe ExportConfig
   }
   deriving stock (Eq, Show)
 
@@ -120,6 +152,7 @@ mergeWithCli cfg RecordOpts{roServerCommand, roTraceOut, roProjectRoot, roConfig
             , rcTraceOut = traceOut
             , rcProjectRoot = projectRoot
             , rcSnapshot = cfSnapshot cfg
+            , rcExport = cfExport cfg
             }
  where
   pickFirst (Just x) _ = Just x

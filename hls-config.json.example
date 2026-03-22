@@ -23,5 +23,8 @@
       ".stack-work/**",
       ".git/**"
     ]
+  },
+  "export": {
+    "globs": ["*.hp", "*.prof", "*.eventlog"]
   }
 }

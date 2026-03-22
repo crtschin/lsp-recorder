@@ -3,7 +3,8 @@ module ConfigSpec (spec) where
 import Data.Aeson (decode, encode)
 import LspRecorder.Cli (RecordOpts (..))
 import LspRecorder.Config
-  ( RecordConfig (..)
+  ( ExportConfig (..)
+  , RecordConfig (..)
   , RecordConfigFile (..)
   , SnapshotConfig (..)
   , mergeWithCli
@@ -24,6 +25,7 @@ emptyFile =
     , cfTraceOut = Nothing
     , cfProjectRoot = Nothing
     , cfSnapshot = Nothing
+    , cfExport = Nothing
     }
 
 emptyOpts :: RecordOpts
@@ -48,10 +50,29 @@ fullFile =
             { scInclude = ["**/*.hs", "**/*.cabal"]
             , scExclude = ["dist-newstyle/**"]
             }
+    , cfExport =
+        Just
+          ExportConfig
+            { ecGlobs = ["*.hp", "*.prof"]
+            , ecDestination = Just "/tmp/prof-out"
+            }
     }
 
 spec :: Spec
 spec = describe "Config" $ do
+  describe "ExportConfig JSON" $ do
+    it "roundtrips with explicit destination" $ do
+      let ec = ExportConfig{ecGlobs = ["*.hp", "*.prof"], ecDestination = Just "/tmp/out"}
+      decode (encode ec) `shouldBe` Just ec
+
+    it "roundtrips with no destination" $ do
+      let ec = ExportConfig{ecGlobs = ["*.hp"], ecDestination = Nothing}
+      decode (encode ec) `shouldBe` Just ec
+
+    it "defaults globs to empty list and destination to Nothing when keys absent" $ do
+      let ec = decode "{}" :: Maybe ExportConfig
+      ec `shouldBe` Just ExportConfig{ecGlobs = [], ecDestination = Nothing}
+
   describe "SnapshotConfig JSON" $ do
     it "roundtrips" $ do
       let sc = SnapshotConfig{scInclude = ["**/*.hs"], scExclude = ["dist/**"]}
@@ -113,6 +134,12 @@ spec = describe "Config" $ do
       case result of
         Left err -> fail err
         Right cfg -> rcSnapshot cfg `shouldBe` cfSnapshot fullFile
+
+    it "carries export config from file" $ do
+      result <- mergeWithCli fullFile emptyOpts
+      case result of
+        Left err -> fail err
+        Right cfg -> rcExport cfg `shouldBe` cfExport fullFile
 
 isLeft :: Either a b -> Bool
 isLeft (Left _) = True
