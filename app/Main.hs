@@ -5,7 +5,6 @@ import LspRecorder.Cli
   ( Command (..)
   , RecordOpts (..)
   , ReplayOpts (..)
-  , TimingMode (..)
   , parseCommand
   )
 import LspRecorder.Config
@@ -15,7 +14,7 @@ import LspRecorder.Config
   )
 import LspRecorder.Record (runRecord)
 import LspRecorder.Replay (ReplayConfig (..), runReplay)
-import LspRecorder.Replay.Timing (immediateStrategy, realisticStrategy)
+import LspRecorder.Replay.Timing (realisticStrategy)
 import System.Directory.OsPath (getCurrentDirectory, makeAbsolute)
 import System.IO (BufferMode (..), hSetBuffering, stderr, stdin, stdout)
 import System.OsPath (OsPath, encodeFS)
@@ -52,7 +51,6 @@ main = do
       ReplayOpts
         { rpTrace
         , rpServerCommand
-        , rpTiming
         , rpReport
         , rpTimeout
         , rpSpeedupFactor
@@ -76,15 +74,12 @@ main = do
           Just sc -> pure sc
         traceOs <- resolvePath rpTrace
         reportOs <- resolvePath rpReport
-        let (strategy, modeName) = case rpTiming of
-              Immediate -> (immediateStrategy, "immediate")
-              Realistic -> (realisticStrategy, "realistic")
         runReplay
           ReplayConfig
             { rcTrace = traceOs
             , rcServerCommand = serverCommand
-            , rcTiming = strategy
-            , rcTimingModeName = modeName
+            , rcTiming = realisticStrategy
+            , rcReplaySpeed = rpSpeedupFactor
             , rcReportPath = reportOs
             , rcTimeoutSeconds = rpTimeout
             , rcSpeedupFactor = rpSpeedupFactor

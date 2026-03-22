@@ -2,7 +2,6 @@ module LspRecorder.Cli
   ( Command (..)
   , RecordOpts (..)
   , ReplayOpts (..)
-  , TimingMode (..)
   , parseCommand
   ) where
 
@@ -17,13 +16,9 @@ data RecordOpts = RecordOpts
   , roConfig :: Maybe FilePath
   }
 
-data TimingMode = Realistic | Immediate
-  deriving stock (Eq, Show)
-
 data ReplayOpts = ReplayOpts
   { rpTrace :: FilePath
   , rpServerCommand :: Maybe String
-  , rpTiming :: TimingMode
   , rpReport :: FilePath
   , rpSpeedupFactor :: Int
   , rpTimeout :: Int
@@ -91,14 +86,6 @@ replayOpts =
               <> help "Shell command to launch the language server (overrides --config)"
           )
       )
-    <*> option
-      timingModeReader
-      ( long "timing"
-          <> metavar "MODE"
-          <> value Immediate
-          <> showDefaultWith (const "immediate")
-          <> help "Timing mode: realistic or immediate"
-      )
     <*> strOption
       ( long "report"
           <> metavar "FILE"
@@ -110,7 +97,7 @@ replayOpts =
           <> metavar "MULTIPLIER"
           <> value 1
           <> showDefault
-          <> help "Factor to reduce pauses between events in 'realistic' (1 = no reduction)"
+          <> help "Factor to reduce pauses between events (1 = no reduction)"
       )
     <*> option
       auto
@@ -135,9 +122,3 @@ replayOpts =
               <> help "Path to a JSON config file (provides server_command when --server-command is absent)"
           )
       )
-
-timingModeReader :: ReadM TimingMode
-timingModeReader = eitherReader $ \case
-  "realistic" -> Right Realistic
-  "immediate" -> Right Immediate
-  s -> Left $ "Unknown timing mode: " <> s <> " (expected: realistic, immediate)"

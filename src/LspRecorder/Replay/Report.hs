@@ -33,7 +33,7 @@ instance ToJSON MethodStats where
 
 data ReplayReport = ReplayReport
   { rrTrace :: FilePath
-  , rrTimingMode :: Text
+  , rrReplaySpeed :: Int
   , rrTotalDurationMs :: Int
   , rrTimedOut :: Int
   , rrMethods :: Map Text MethodStats
@@ -41,10 +41,10 @@ data ReplayReport = ReplayReport
   deriving stock (Eq, Show)
 
 instance ToJSON ReplayReport where
-  toJSON ReplayReport{rrTrace, rrTimingMode, rrTotalDurationMs, rrTimedOut, rrMethods} =
+  toJSON ReplayReport{rrTrace, rrReplaySpeed, rrTotalDurationMs, rrTimedOut, rrMethods} =
     object
       [ "trace" .= rrTrace
-      , "timing_mode" .= rrTimingMode
+      , "replay_speedup" .= rrReplaySpeed
       , "total_duration_ms" .= rrTotalDurationMs
       , "timed_out_requests" .= rrTimedOut
       , "methods" .= rrMethods

@@ -105,8 +105,8 @@ data ReplayConfig = ReplayConfig
   -- ^ Shell command used to launch the language server under test.
   , rcTiming :: TimingStrategy
   -- ^ Controls inter-message delays during replay.
-  , rcTimingModeName :: Text
-  -- ^ Human-readable name of the timing mode, written into the report.
+  , rcReplaySpeed :: Int
+  -- ^ Factor of reduction between events in original recorded trace.
   , rcReportPath :: OsPath
   -- ^ Path where the JSON latency report will be written.
   , rcSpeedupFactor :: Int
@@ -174,7 +174,7 @@ runReplay
     { rcTrace
     , rcServerCommand
     , rcTiming
-    , rcTimingModeName
+    , rcReplaySpeed
     , rcReportPath
     , rcSpeedupFactor
     , rcTimeoutSeconds
@@ -276,7 +276,7 @@ runReplay
         let report =
               ReplayReport
                 { rrTrace = rrTraceStr
-                , rrTimingMode = rcTimingModeName
+                , rrReplaySpeed = rcReplaySpeed
                 , rrTotalDurationMs = totalMs
                 , rrTimedOut = timedOut
                 , rrMethods = generateReport latencies
@@ -392,6 +392,7 @@ replayMessages serverIn msgs timing pendingRef latenciesRef timeoutsRef speedupF
         delay = rawDelay `quot` speedupFactor
     when (delay > 0) $ threadDelay delay
 
+    -- TODO: Deduplicate this with the id-writing where possible
     let payload = rewriter $ BL.toStrict $ encode (tmMessage m)
         method = extractMethod (tmMessage m)
         msgId = extractId (tmMessage m)
@@ -447,6 +448,8 @@ replayMessages serverIn msgs timing pendingRef latenciesRef timeoutsRef speedupF
 
         case remapped of
           Just newIdVal -> do
+            -- TODO: This is re-encoded, can probably be made more efficient and
+            -- deduplicated with the initial one above.
             let rewritten = BL.toStrict $ encode $ rewriteId newIdVal (tmMessage m)
                 rewrittenPayload = rewriter rewritten
             hPutStrLn stderr $ "[lsp-recorder] sending response (id=" <> T.unpack origId <> ")"
@@ -502,8 +505,7 @@ handleServerMessage pendingRef origServerReqs idRemapRef payload =
               mOrigId <- atomically $ tryReadTQueue q
               case mOrigId of
                 Nothing -> pure () -- no more original ids for this method
-                Just origId ->
-                  atomically $ modifyTVar' idRemapRef (Map.insert origId newIdVal)
+                Just origId -> atomically $ modifyTVar' idRemapRef (Map.insert origId newIdVal)
         -- Server response: has id, no method
         (Nothing, Just rid, _) -> do
           pending <- readTVarIO pendingRef
