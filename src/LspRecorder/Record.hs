@@ -35,8 +35,7 @@ import LspRecorder.Lsp.Types
   )
 import LspRecorder.Proxy (ProxyConfig (..), runProxy)
 import LspRecorder.Server (cleanupServer, spawnServer)
-import LspRecorder.Snapshot (takeSnapshot)
-import System.OsPath (OsPath, decodeFS, encodeFS, takeBaseName, takeDirectory, (</>))
+import LspRecorder.Snapshot (snapshotArchivePath, takeSnapshot)
 import System.IO
   ( BufferMode (..)
   , Handle
@@ -49,6 +48,7 @@ import System.IO
   , stdout
   )
 import System.IO qualified as IO
+import System.OsPath (OsPath, decodeFS)
 import System.Posix.Signals (Handler (..), installHandler, sigPIPE, sigTERM)
 
 -- | Run a recording session.
@@ -77,7 +77,8 @@ runRecord RecordConfig{rcServerCommand, rcTraceOut, rcProjectRoot, rcSnapshot} =
   traceOutStr <- decodeFS rcTraceOut
   projectRootStr <- decodeFS rcProjectRoot
 
-  hPutStrLn stderr $ "[lsp-recorder] starting session: server=" <> rcServerCommand <> " trace=" <> traceOutStr
+  hPutStrLn stderr $
+    "[lsp-recorder] starting session: server=" <> rcServerCommand <> " trace=" <> traceOutStr
 
   -- Take project snapshot before starting the proxy, if configured.
   mSnapshotPath <- case rcSnapshot of
@@ -137,13 +138,6 @@ runRecord RecordConfig{rcServerCommand, rcTraceOut, rcProjectRoot, rcSnapshot} =
         Just si -> do
           backfillHeader rcTraceOut header{thServerInfo = Just si}
           hPutStrLn stderr "[lsp-recorder] server info backfilled"
-
--- | Derive the snapshot archive path from the trace file path.
--- e.g. @"session.jsonl"@ → @"session.snapshot.tar.zst"@
-snapshotArchivePath :: OsPath -> IO OsPath
-snapshotArchivePath tracePath = do
-  suffix <- encodeFS ".snapshot.tar.zst"
-  pure $ takeDirectory tracePath </> (takeBaseName tracePath <> suffix)
 
 -- | Logging thread loop. Drains 'LogEntry' values from the bounded queue,
 -- converts each to a 'TraceMessage' with a monotonic sequence number, and

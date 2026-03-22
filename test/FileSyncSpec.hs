@@ -1,5 +1,6 @@
 module FileSyncSpec (spec) where
 
+import Control.Exception (catch)
 import Data.Aeson (Value, object, (.=))
 import Data.Text (Text)
 import Data.Text qualified as T
@@ -14,7 +15,6 @@ import LspRecorder.Replay.FileSync
 import System.Directory (doesFileExist, removeFile)
 import System.IO.Error (isDoesNotExistError)
 import Test.Hspec (Spec, describe, it, shouldBe, shouldReturn)
-import Control.Exception (catch)
 
 -- ---------------------------------------------------------------------------
 -- Helpers
@@ -58,13 +58,13 @@ didChangeRange uri sl sc el ec newText =
           [ "textDocument" .= object ["uri" .= uri, "version" .= (2 :: Int)]
           , "contentChanges"
               .= [ object
-                    [ "range"
-                        .= object
-                          [ "start" .= object ["line" .= sl, "character" .= sc]
-                          , "end" .= object ["line" .= el, "character" .= ec]
-                          ]
-                    , "text" .= newText
-                    ]
+                     [ "range"
+                         .= object
+                           [ "start" .= object ["line" .= sl, "character" .= sc]
+                           , "end" .= object ["line" .= el, "character" .= ec]
+                           ]
+                     , "text" .= newText
+                     ]
                  ]
           ]
     ]

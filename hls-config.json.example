@@ -5,12 +5,18 @@
   "snapshot": {
     "include": [
       "**/*.hs",
+      "**/*.lhs",
       "**/*.cabal",
+      "**/package.yaml",
       "cabal.project",
       "cabal.project.local",
+      "cabal.project.freeze",
       "stack.yaml",
+      "stack.yaml.lock",
       "hie.yaml",
-      "*.yaml"
+      "Setup.hs",
+      "Setup.lhs",
+      "fourmolu.yaml"
     ],
     "exclude": [
       "dist-newstyle/**",

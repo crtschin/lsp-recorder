@@ -11,27 +11,27 @@ import System.Directory.OsPath
   , removeDirectoryRecursive
   , removeFile
   )
-import System.OsPath (OsPath, decodeFS, encodeFS, takeDirectory, (</>))
 import System.IO (hClose, openTempFile)
+import System.OsPath (OsPath, decodeFS, encodeFS, takeDirectory, (</>))
 import Test.Hspec (Spec, around, describe, it, shouldBe, shouldMatchList, shouldReturn)
 
 -- | Run a test inside a fresh temporary directory, cleaned up afterward.
 withTempDir :: (OsPath -> IO ()) -> IO ()
 withTempDir action =
   bracket acquire release action
-  where
-    acquire = do
-      base <- getTemporaryDirectory
-      baseStr <- decodeFS base
-      (tmpFileStr, h) <- openTempFile baseStr "snapshot-test"
-      hClose h
-      tmpFile <- encodeFS tmpFileStr
-      removeFile tmpFile
-      dotDSuffix <- encodeFS ".d"
-      let dir = tmpFile <> dotDSuffix
-      createDirectoryIfMissing True dir
-      pure dir
-    release = removeDirectoryRecursive
+ where
+  acquire = do
+    base <- getTemporaryDirectory
+    baseStr <- decodeFS base
+    (tmpFileStr, h) <- openTempFile baseStr "snapshot-test"
+    hClose h
+    tmpFile <- encodeFS tmpFileStr
+    removeFile tmpFile
+    dotDSuffix <- encodeFS ".d"
+    let dir = tmpFile <> dotDSuffix
+    createDirectoryIfMissing True dir
+    pure dir
+  release = removeDirectoryRecursive
 
 -- | Write an empty file at @path@, creating parent directories as needed.
 touch :: OsPath -> IO ()

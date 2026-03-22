@@ -22,12 +22,14 @@ data TimingMode = Realistic | Immediate
 
 data ReplayOpts = ReplayOpts
   { rpTrace :: FilePath
-  , rpServerCommand :: String
+  , rpServerCommand :: Maybe String
   , rpTiming :: TimingMode
   , rpReport :: FilePath
+  , rpSpeedupFactor :: Int
   , rpTimeout :: Int
   , rpNoRestore :: Bool
   , rpNoFileSync :: Bool
+  , rpConfig :: Maybe FilePath
   }
 
 parseCommand :: IO Command
@@ -82,10 +84,12 @@ replayOpts =
           <> metavar "FILE"
           <> help "Path to the JSONL trace file to replay"
       )
-    <*> strOption
-      ( long "server-command"
-          <> metavar "CMD"
-          <> help "Shell command to launch the language server"
+    <*> optional
+      ( strOption
+          ( long "server-command"
+              <> metavar "CMD"
+              <> help "Shell command to launch the language server (overrides --config)"
+          )
       )
     <*> option
       timingModeReader
@@ -102,6 +106,14 @@ replayOpts =
       )
     <*> option
       auto
+      ( long "speedup-factor"
+          <> metavar "MULTIPLIER"
+          <> value 1
+          <> showDefault
+          <> help "Factor to reduce pauses between events in 'realistic' (1 = no reduction)"
+      )
+    <*> option
+      auto
       ( long "timeout"
           <> metavar "SECONDS"
           <> value 60
@@ -115,6 +127,13 @@ replayOpts =
     <*> switch
       ( long "no-file-sync"
           <> help "Skip applying file changes to disk during replay"
+      )
+    <*> optional
+      ( strOption
+          ( long "config"
+              <> metavar "FILE"
+              <> help "Path to a JSON config file (provides server_command when --server-command is absent)"
+          )
       )
 
 timingModeReader :: ReadM TimingMode

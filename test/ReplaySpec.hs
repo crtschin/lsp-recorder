@@ -7,7 +7,14 @@ import Data.Map.Strict qualified as Map
 import Data.Time (UTCTime)
 import Data.Time.Clock.POSIX (posixSecondsToUTCTime)
 import LspRecorder.Lsp.Types (Direction (..), TraceHeader (..), TraceMessage (..))
-import LspRecorder.Replay (extractId, extractMethod, parseTrace, rewritePayload)
+import LspRecorder.Replay
+  ( extractId
+  , extractIdValue
+  , extractMethod
+  , parseTrace
+  , rewriteId
+  , rewritePayload
+  )
 import LspRecorder.Replay.Report (MethodStats (..), generateReport)
 import LspRecorder.Replay.Timing (TimingStrategy (..), immediateStrategy, realisticStrategy)
 import System.Directory (removeFile)
@@ -118,6 +125,30 @@ spec = do
 
     it "returns Nothing for boolean value" $
       extractId (object ["id" .= True]) `shouldBe` Nothing
+
+  describe "extractIdValue" $ do
+    it "extracts string id as Value" $
+      extractIdValue (object ["id" .= ("req-1" :: String)]) `shouldBe` Just (String "req-1")
+
+    it "extracts numeric id as Value preserving exact Scientific" $
+      extractIdValue (object ["id" .= (42 :: Int)]) `shouldBe` Just (Number 42)
+
+    it "returns Nothing for missing field" $
+      extractIdValue (object ["method" .= ("test" :: String)]) `shouldBe` Nothing
+
+    it "returns Nothing for non-object input" $
+      extractIdValue (String "42") `shouldBe` Nothing
+
+  describe "rewriteId" $ do
+    it "replaces id in an Object" $ do
+      let msg = object ["id" .= (1 :: Int), "method" .= ("test" :: String)]
+          newId = Number 99
+          result = rewriteId newId msg
+      extractIdValue result `shouldBe` Just newId
+
+    it "non-object passes through unchanged" $ do
+      let val = String "hello"
+      rewriteId (Number 1) val `shouldBe` val
 
   describe "generateReport" $ do
     it "empty input produces empty map" $

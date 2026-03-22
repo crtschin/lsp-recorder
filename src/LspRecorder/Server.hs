@@ -30,9 +30,10 @@ cleanupServer :: (Handle, Handle, ProcessHandle) -> IO ()
 cleanupServer (sIn, sOut, ph) = do
   hPutStrLn stderr "[lsp-recorder] terminating server"
   terminateProcess ph `catch` \(e :: SomeException) -> hPutStrLn stderr $ "[lsp-recorder] terminateProcess error: " <> show e
-  _ <- waitForProcess ph `catch` \(e :: SomeException) -> do
-    hPutStrLn stderr $ "[lsp-recorder] waitForProcess error: " <> show e
-    pure ExitSuccess
+  _ <-
+    waitForProcess ph `catch` \(e :: SomeException) -> do
+      hPutStrLn stderr $ "[lsp-recorder] waitForProcess error: " <> show e
+      pure ExitSuccess
   hClose sIn `catch` \(_ :: SomeException) -> pure ()
   hClose sOut `catch` \(_ :: SomeException) -> pure ()
 

@@ -33,26 +33,33 @@ module LspRecorder.Replay
   , runReplay
   , extractMethod
   , extractId
+  , extractIdValue
+  , rewriteId
   , parseTrace
   , rewritePayload
   ) where
 
 import Control.Concurrent (threadDelay)
-import System.Timeout (timeout)
 import Control.Concurrent.Async (Async, async, mapConcurrently_, wait)
 import Control.Concurrent.STM
   ( TMVar
+  , TQueue
   , TVar
   , atomically
   , modifyTVar'
   , newEmptyTMVar
+  , newTQueueIO
   , newTVarIO
   , putTMVar
+  , readTVar
   , readTVarIO
+  , retry
   , takeTMVar
+  , tryReadTQueue
+  , writeTQueue
   )
 import Control.Exception (SomeException, bracket, catch)
-import Control.Monad (when)
+import Control.Monad (when, void)
 import Data.Aeson (Value (..), decodeStrict, encode)
 import Data.Aeson.Key qualified as Key
 import Data.Aeson.KeyMap qualified as KM
@@ -72,7 +79,7 @@ import LspRecorder.Replay.FileSync (DocState, applyFileEffect, newDocState)
 import LspRecorder.Replay.Report (ReplayReport (..), generateReport, writeReport)
 import LspRecorder.Replay.Timing (TimingStrategy (..))
 import LspRecorder.Server (cleanupServer, spawnServer)
-import LspRecorder.Snapshot (restoreSnapshot)
+import LspRecorder.Snapshot (restoreSnapshot, snapshotArchivePath)
 import System.Directory.OsPath
   ( createDirectoryIfMissing
   , getTemporaryDirectory
@@ -81,6 +88,7 @@ import System.Directory.OsPath
   )
 import System.IO (BufferMode (..), Handle, hClose, hPutStrLn, hSetBuffering, openTempFile, stderr)
 import System.OsPath (OsPath, decodeFS, encodeFS)
+import System.Timeout (timeout)
 
 -- | Configuration for a replay session.
 data ReplayConfig = ReplayConfig
@@ -94,6 +102,8 @@ data ReplayConfig = ReplayConfig
   -- ^ Human-readable name of the timing mode, written into the report.
   , rcReportPath :: OsPath
   -- ^ Path where the JSON latency report will be written.
+  , rcSpeedupFactor :: Int
+  -- ^ Factor to reduce pauses between events in 'realistic'.
   , rcTimeoutSeconds :: Int
   -- ^ Per-request timeout in seconds. 0 means no timeout.
   , rcNoRestore :: Bool
@@ -106,6 +116,31 @@ data ReplayConfig = ReplayConfig
 -- Maps request @id@ to the @method@ name and a 'TMVar' that the reader thread
 -- fills with the response arrival timestamp.
 type PendingMap = Map Text (Text, TMVar UTCTime)
+
+-- | Pre-scan the trace for server→client requests (messages with both a method
+-- and an id, direction ServerToClient). Returns a map from method name to a
+-- 'TQueue' of the original ids in trace order. During replay, when the fresh
+-- server sends a request for a given method, we pop the next original id from
+-- the queue to build the id remap.
+buildOrigServerReqs :: [TraceMessage] -> IO (Map Text (TQueue Text))
+buildOrigServerReqs msgs = do
+  let serverReqs =
+        [ (meth, rid)
+        | m <- msgs
+        , tmDirection m == ServerToClient
+        , Just meth <- [extractMethod (tmMessage m)]
+        , Just rid <- [extractId (tmMessage m)]
+        ]
+  -- Group by method
+  let grouped = Map.fromListWith (++) [(meth, [rid]) | (meth, rid) <- serverReqs]
+  -- Create TQueues with ids in trace order
+  Map.traverseWithKey
+    ( \_ ids -> do
+        q <- newTQueueIO
+        mapM_ (atomically . writeTQueue q) ids
+        pure q
+    )
+    grouped
 
 -- | Run a replay session.
 --
@@ -122,18 +157,32 @@ type PendingMap = Map Text (Text, TMVar UTCTime)
 --    handles and the reader thread.
 -- 7. Writes the latency report to 'rcReportPath'.
 runReplay :: ReplayConfig -> IO ()
-runReplay ReplayConfig{rcTrace, rcServerCommand, rcTiming, rcTimingModeName, rcReportPath, rcTimeoutSeconds, rcNoRestore, rcNoFileSync} = do
+runReplay ReplayConfig
+            { rcTrace
+            , rcServerCommand
+            , rcTiming
+            , rcTimingModeName
+            , rcReportPath
+            , rcSpeedupFactor
+            , rcTimeoutSeconds
+            , rcNoRestore
+            , rcNoFileSync
+            } = do
   (header, messages) <- parseTrace rcTrace
 
   let clientMsgs = filter (\m -> tmDirection m == ClientToServer) messages
-      mSnapshotStr = if rcNoRestore then Nothing else thSnapshotPath header
 
-  mSnapshotPath <- traverse encodeFS mSnapshotStr
+  mSnapshotPath <-
+    if rcNoRestore || null (thSnapshotPath header)
+      then pure Nothing
+      else Just <$> snapshotArchivePath rcTrace
   oldRoot <- encodeFS (thProjectRoot header)
 
   pendingRef <- newTVarIO (Map.empty :: PendingMap)
   latenciesRef <- newTVarIO ([] :: [(Text, Double)])
   timeoutsRef <- newTVarIO (0 :: Int)
+  origServerReqs <- buildOrigServerReqs messages
+  idRemapRef <- newTVarIO (Map.empty :: Map Text Value)
 
   mDocState <-
     if rcNoFileSync || rcNoRestore
@@ -149,16 +198,30 @@ runReplay ReplayConfig{rcTrace, rcServerCommand, rcTiming, rcTimingModeName, rcR
 
       readerThread <-
         async $
-          readFramedMessages serverOut (resolveResponse pendingRef)
+          readFramedMessages serverOut (handleServerMessage pendingRef origServerReqs idRemapRef)
             `catch` \(_ :: SomeException) -> pure ()
 
-      asyncHandles <- replayMessages serverIn clientMsgs rcTiming pendingRef latenciesRef timeoutsRef rcTimeoutSeconds rewriter mDocState
+      asyncHandles <-
+        replayMessages
+          serverIn
+          clientMsgs
+          rcTiming
+          pendingRef
+          latenciesRef
+          timeoutsRef
+          rcSpeedupFactor
+          rcTimeoutSeconds
+          rewriter
+          mDocState
+          idRemapRef
 
-      threadDelay 1_000_000
+      when (not $ tsWaitForResponse rcTiming) $ threadDelay 1_000_000
 
+      hPutStrLn stderr $ "[lsp-recorder] Waiting on " <> show (length asyncHandles) <> " events."
       mapConcurrently_ wait asyncHandles
-      wait readerThread `catch` \(_ :: SomeException) -> pure ()
+      void (timeout 10_000_000 (wait readerThread)) `catch` \(_ :: SomeException) -> pure ()
 
+      hPutStrLn stderr $ "[lsp-recorder] Replay done."
       endTime <- getCurrentTime
       let totalMs = round (realToFrac (diffUTCTime endTime startTime) * 1000 :: Double)
 
@@ -240,14 +303,21 @@ replayMessages
   -> TVar [(Text, Double)]
   -> TVar Int
   -> Int
+  -> Int
   -> (ByteString -> ByteString)
   -> Maybe DocState
+  -> TVar (Map Text Value)
   -> IO [Async ()]
-replayMessages serverIn msgs timing pendingRef latenciesRef timeoutsRef timeoutSeconds rewriter mDocState = go msgs 0 []
+replayMessages serverIn msgs timing pendingRef latenciesRef timeoutsRef speedupFactor timeoutSeconds rewriter mDocState idRemapRef =
+  let initUs = case msgs of
+        (m : _) -> tmTimestampUs m
+        [] -> 0
+   in go msgs initUs []
  where
   go [] _ acc = pure acc
   go (m : rest) prevUs acc = do
-    let delay = tsComputeDelay timing prevUs (tmTimestampUs m)
+    let rawDelay = tsComputeDelay timing prevUs (tmTimestampUs m)
+        delay = rawDelay `quot` speedupFactor
     when (delay > 0) $ threadDelay delay
 
     let payload = rewriter $ BL.toStrict $ encode (tmMessage m)
@@ -259,52 +329,107 @@ replayMessages serverIn msgs timing pendingRef latenciesRef timeoutsRef timeoutS
         var <- atomically newEmptyTMVar
         sendTs <- getCurrentTime
         atomically $ modifyTVar' pendingRef (Map.insert rid (meth, var))
+        hPutStrLn stderr $ "[lsp-recorder] sending request: " <> T.unpack meth <> " (id=" <> T.unpack rid <> ")"
         BS.hPut serverIn (encodeFrame payload)
-        h <- async $ do
-          let waitAction = atomically $ takeTMVar var
-          result <-
-            if timeoutSeconds <= 0
-              then fmap Just waitAction
-              else timeout (timeoutSeconds * 1_000_000) waitAction
-          case result of
-            Just recvTs -> do
-              let latencyMs = realToFrac (diffUTCTime recvTs sendTs) * 1000
-              atomically $ modifyTVar' latenciesRef ((meth, latencyMs) :)
-            Nothing -> do
-              atomically $ do
-                modifyTVar' pendingRef (Map.delete rid)
-                modifyTVar' timeoutsRef (+ 1)
-              hPutStrLn stderr $
-                "Warning: request timed out after "
-                  <> show timeoutSeconds
-                  <> "s: "
-                  <> T.unpack meth
-                  <> " (id="
-                  <> T.unpack rid
-                  <> ")"
-        pure (h : acc)
+        let waitAction = atomically $ takeTMVar var
+            doWait = do
+              result <-
+                if timeoutSeconds <= 0
+                  then fmap Just waitAction
+                  else timeout (timeoutSeconds * 1_000_000) waitAction
+              case result of
+                Just recvTs -> do
+                  let latencyMs = realToFrac (diffUTCTime recvTs sendTs) * 1000
+                  atomically $ modifyTVar' latenciesRef ((meth, latencyMs) :)
+                Nothing -> do
+                  atomically $ do
+                    modifyTVar' pendingRef (Map.delete rid)
+                    modifyTVar' timeoutsRef (+ 1)
+                  hPutStrLn stderr $
+                    "Warning: request timed out after "
+                      <> show timeoutSeconds
+                      <> "s: "
+                      <> T.unpack meth
+                      <> " (id="
+                      <> T.unpack rid
+                      <> ")"
+        if tsWaitForResponse timing
+          then do
+            doWait
+            pure acc
+          else do
+            h <- async (void $ timeout 30_000_000 $ doWait)
+            pure (h : acc)
+
+      -- Client response to a server request (has id, no method): remap the id
+      (Nothing, Just origId) -> do
+        -- Wait up to 5s for the reader thread to process the corresponding server request
+        remapped <- timeout 5_000_000 $ atomically $ do
+          remap <- readTVar idRemapRef
+          case Map.lookup origId remap of
+            Nothing -> retry
+            Just newIdVal -> do
+              modifyTVar' idRemapRef (Map.delete origId)
+              pure newIdVal
+
+        case remapped of
+          Just newIdVal -> do
+            let rewritten = BL.toStrict $ encode $ rewriteId newIdVal (tmMessage m)
+                rewrittenPayload = rewriter rewritten
+            hPutStrLn stderr $ "[lsp-recorder] sending response (id=" <> T.unpack origId <> ")"
+            BS.hPut serverIn (encodeFrame rewrittenPayload)
+          Nothing -> do
+            hPutStrLn stderr $ "[lsp-recorder] warning: no id remap found for client response id=" <> T.unpack origId <> ", sending as-is"
+            BS.hPut serverIn (encodeFrame payload)
+        pure acc
+
+      -- Notification (has method, no id) or other
       _ -> do
         case (mDocState, decodeStrict payload) of
           (Just ds, Just val) -> applyFileEffect ds val
           _ -> pure ()
+        hPutStrLn stderr $ "[lsp-recorder] sending notification: " <> maybe "unknown" T.unpack method
         BS.hPut serverIn (encodeFrame payload)
         pure acc
 
     go rest (tmTimestampUs m) newAcc
 
--- | Called by the reader thread for each framed response from the server.
--- Decodes the payload, looks up its @id@ in 'PendingMap', and if found,
--- removes the entry and signals the waiting 'TMVar' with the current time.
--- Silently ignores malformed JSON and responses with no matching pending entry
--- (e.g. server-initiated notifications).
-resolveResponse :: TVar PendingMap -> ByteString -> IO ()
-resolveResponse pendingRef payload =
+-- | Called by the reader thread for each framed message from the server.
+-- Handles two kinds of messages:
+--
+-- * __Server response__ (has @id@, no @method@): resolves the matching entry
+--   in 'PendingMap' by signalling the 'TMVar' with the current time.
+--
+-- * __Server request__ (has both @method@ and @id@): pops the next original
+--   id for that method from 'origServerReqs' and inserts a mapping from the
+--   original id to the new (fresh server) id into 'idRemapRef'. This allows
+--   the main loop to rewrite client responses before forwarding them.
+handleServerMessage
+  :: TVar PendingMap
+  -> Map Text (TQueue Text)
+  -> TVar (Map Text Value)
+  -> ByteString
+  -> IO ()
+handleServerMessage pendingRef origServerReqs idRemapRef payload =
   case decodeStrict payload of
     Nothing -> pure ()
-    Just val ->
-      case extractId val of
-        Nothing -> pure ()
-        Just rid -> do
+    Just val -> do
+      let method = extractMethod val
+          msgId = extractId val
+          idVal = extractIdValue val
+      case (method, msgId, idVal) of
+        -- Server request: has method and id
+        (Just meth, _msgId, Just newIdVal) ->
+          case Map.lookup meth origServerReqs of
+            Nothing -> pure () -- unknown method, ignore
+            Just q -> do
+              mOrigId <- atomically $ tryReadTQueue q
+              case mOrigId of
+                Nothing -> pure () -- no more original ids for this method
+                Just origId ->
+                  atomically $ modifyTVar' idRemapRef (Map.insert origId newIdVal)
+        -- Server response: has id, no method
+        (Nothing, Just rid, _) -> do
           pending <- readTVarIO pendingRef
           case Map.lookup rid pending of
             Nothing -> pure ()
@@ -312,6 +437,8 @@ resolveResponse pendingRef payload =
               atomically $ modifyTVar' pendingRef (Map.delete rid)
               ts <- getCurrentTime
               atomically $ putTMVar var ts
+        -- Server notification or other: ignore
+        _ -> pure ()
 
 -- | Read and parse a JSONL trace file.
 --
@@ -363,3 +490,19 @@ extractId (Object o) = case KM.lookup (Key.fromText "id") o of
   Just (Number n) -> Just (T.pack $ show n)
   _ -> Nothing
 extractId _ = Nothing
+
+-- | Extract the @id@ field from a JSON-RPC message as a raw 'Value'.
+-- Unlike 'extractId', this preserves the original JSON type (Number vs String)
+-- so it can be written back without type coercion.
+extractIdValue :: Value -> Maybe Value
+extractIdValue (Object o) = case KM.lookup (Key.fromText "id") o of
+  Just v@(String _) -> Just v
+  Just v@(Number _) -> Just v
+  _ -> Nothing
+extractIdValue _ = Nothing
+
+-- | Replace the @id@ field in a JSON-RPC message object with a new value.
+-- Non-object values pass through unchanged.
+rewriteId :: Value -> Value -> Value
+rewriteId newId (Object o) = Object (KM.insert (Key.fromText "id") newId o)
+rewriteId _ v = v

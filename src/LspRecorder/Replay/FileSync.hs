@@ -113,14 +113,16 @@ applyOneChange current val =
         (Just range, Just newText) ->
           case (field "start" range, field "end" range) of
             (Just start, Just end) ->
-              let startPos = Position
-                    { posLine = fromIntegral (intField "line" start)
-                    , posColumn = fromIntegral (intField "character" start)
-                    }
-                  endPos = Position
-                    { posLine = fromIntegral (intField "line" end)
-                    , posColumn = fromIntegral (intField "character" end)
-                    }
+              let startPos =
+                    Position
+                      { posLine = fromIntegral (intField "line" start)
+                      , posColumn = fromIntegral (intField "character" start)
+                      }
+                  endPos =
+                    Position
+                      { posLine = fromIntegral (intField "line" end)
+                      , posColumn = fromIntegral (intField "character" end)
+                      }
                   (before, _) = Rope.splitAtPosition startPos current
                   (_, after) = Rope.splitAtPosition endPos current
                in before <> Rope.fromText newText <> after

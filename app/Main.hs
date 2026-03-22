@@ -1,5 +1,6 @@
 module Main where
 
+import Control.Applicative ((<|>))
 import LspRecorder.Cli
   ( Command (..)
   , RecordOpts (..)
@@ -41,22 +42,45 @@ main = do
       case mergeResult of
         Left err -> fail err
         Right cfg -> runRecord cfg
-    CmdReplay ReplayOpts{rpTrace, rpServerCommand, rpTiming, rpReport, rpTimeout, rpNoRestore, rpNoFileSync} -> do
+    CmdReplay
+      ReplayOpts
+        { rpTrace
+        , rpServerCommand
+        , rpTiming
+        , rpReport
+        , rpTimeout
+        , rpSpeedupFactor
+        , rpNoRestore
+        , rpNoFileSync
+        , rpConfig
+        } -> do
+      fileCfg <- case rpConfig of
+        Nothing ->
+          pure
+            RecordConfigFile
+              { cfServerCommand = Nothing
+              , cfTraceOut = Nothing
+              , cfProjectRoot = Nothing
+              , cfSnapshot = Nothing
+              }
+        Just path -> resolvePath path >>= loadConfig
+      serverCommand <- case rpServerCommand <|> cfServerCommand fileCfg of
+        Nothing -> fail "Missing required field: server_command / --server-command"
+        Just sc -> pure sc
       traceOs <- resolvePath rpTrace
       reportOs <- resolvePath rpReport
-      let
-        (strategy, modeName) = case rpTiming of
-          Immediate -> (immediateStrategy, "immediate")
-          Realistic -> (realisticStrategy, "realistic")
-       in
-        runReplay
-          ReplayConfig
-            { rcTrace = traceOs
-            , rcServerCommand = rpServerCommand
-            , rcTiming = strategy
-            , rcTimingModeName = modeName
-            , rcReportPath = reportOs
-            , rcTimeoutSeconds = rpTimeout
-            , rcNoRestore = rpNoRestore
-            , rcNoFileSync = rpNoFileSync
-            }
+      let (strategy, modeName) = case rpTiming of
+            Immediate -> (immediateStrategy, "immediate")
+            Realistic -> (realisticStrategy, "realistic")
+      runReplay
+        ReplayConfig
+          { rcTrace = traceOs
+          , rcServerCommand = serverCommand
+          , rcTiming = strategy
+          , rcTimingModeName = modeName
+          , rcReportPath = reportOs
+          , rcTimeoutSeconds = rpTimeout
+          , rcSpeedupFactor = rpSpeedupFactor
+          , rcNoRestore = rpNoRestore
+          , rcNoFileSync = rpNoFileSync
+          }

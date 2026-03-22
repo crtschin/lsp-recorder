@@ -19,11 +19,11 @@ import Data.Aeson
   , (.:?)
   , (.=)
   )
-import Data.ByteString.Lazy qualified as BL
 import Data.Aeson qualified as Aeson
+import Data.ByteString.Lazy qualified as BL
 import LspRecorder.Cli (RecordOpts (..))
-import System.OsPath (OsPath, decodeFS, encodeFS)
 import System.Directory.OsPath (makeAbsolute)
+import System.OsPath (OsPath, decodeFS, encodeFS)
 
 --------------------------------------------------------------------------------
 -- SnapshotConfig
@@ -113,12 +113,14 @@ mergeWithCli cfg RecordOpts{roServerCommand, roTraceOut, roProjectRoot, roConfig
     (Just sc, Just to, Just pr) -> do
       traceOut <- encodeFS to >>= makeAbsolute
       projectRoot <- encodeFS pr >>= makeAbsolute
-      pure $ Right RecordConfig
-        { rcServerCommand = sc
-        , rcTraceOut = traceOut
-        , rcProjectRoot = projectRoot
-        , rcSnapshot = cfSnapshot cfg
-        }
+      pure $
+        Right
+          RecordConfig
+            { rcServerCommand = sc
+            , rcTraceOut = traceOut
+            , rcProjectRoot = projectRoot
+            , rcSnapshot = cfSnapshot cfg
+            }
  where
   pickFirst (Just x) _ = Just x
   pickFirst Nothing y = y

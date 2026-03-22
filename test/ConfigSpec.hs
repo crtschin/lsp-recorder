@@ -79,7 +79,12 @@ spec = describe "Config" $ do
           rcProjectRoot cfg `shouldBe` toOsPath "/tmp/proj"
 
     it "CLI flags override file values" $ do
-      let opts = emptyOpts{roServerCommand = Just "my-lsp", roTraceOut = Just "/tmp/out.jsonl", roProjectRoot = Just "/my/proj"}
+      let opts =
+            emptyOpts
+              { roServerCommand = Just "my-lsp"
+              , roTraceOut = Just "/tmp/out.jsonl"
+              , roProjectRoot = Just "/my/proj"
+              }
       result <- mergeWithCli fullFile opts
       case result of
         Left err -> fail err
