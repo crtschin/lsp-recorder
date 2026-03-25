@@ -48,15 +48,6 @@ lsp-recorder replay \
   --report report.json
 ```
 
-Options:
-
-| Flag | Default | Description |
-|------|---------|-------------|
-| `--speedup-factor N` | 1 | Divide inter-message delays by N |
-| `--timeout N` | 60 | Per-request timeout in seconds (0 = none) |
-| `--no-restore` | off | Skip snapshot extraction, use cwd |
-| `--no-file-sync` | off | Skip applying file changes during replay |
-
 The report contains per-method p50/p95/p99 latency stats in JSON. Note that any
 non-notification request that did not get a response within the timeout (for
 example due to deduplication done by the language server) is omitted from the
