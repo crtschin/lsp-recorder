@@ -5,6 +5,7 @@ module LspRecorder.Server
   ) where
 
 import Control.Exception (SomeException, bracket, catch)
+import Data.List (uncons)
 import System.IO (Handle, hClose, hPutStrLn, stderr)
 import System.OsPath (OsPath, decodeFS)
 import System.Process
@@ -13,10 +14,10 @@ import System.Process
   , StdStream (..)
   , cleanupProcess
   , createProcess
-  , waitForProcess, proc
+  , proc
+  , waitForProcess
   )
 import System.Timeout (timeout)
-import Data.List (uncons)
 
 spawnServer :: Maybe OsPath -> String -> IO (Handle, Handle, ProcessHandle)
 spawnServer mcwd cmd = do

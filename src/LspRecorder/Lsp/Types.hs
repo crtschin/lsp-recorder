@@ -74,24 +74,25 @@ data TraceHeader = TraceHeader
   deriving stock (Eq, Show)
 
 instance ToJSON TraceHeader where
-  toJSON TraceHeader
-           { thTraceVersion
-           , thRecordedAt
-           , thServerCommand
-           , thProjectRoot
-           , thServerInfo
-           , thOs
-           , thSnapshotPath
-           } =
-    object
-      [ "trace_version" .= thTraceVersion
-      , "recorded_at" .= thRecordedAt
-      , "server_command" .= thServerCommand
-      , "project_root" .= thProjectRoot
-      , "server_info" .= thServerInfo
-      , "os" .= thOs
-      , "snapshot_path" .= thSnapshotPath
-      ]
+  toJSON
+    TraceHeader
+      { thTraceVersion
+      , thRecordedAt
+      , thServerCommand
+      , thProjectRoot
+      , thServerInfo
+      , thOs
+      , thSnapshotPath
+      } =
+      object
+        [ "trace_version" .= thTraceVersion
+        , "recorded_at" .= thRecordedAt
+        , "server_command" .= thServerCommand
+        , "project_root" .= thProjectRoot
+        , "server_info" .= thServerInfo
+        , "os" .= thOs
+        , "snapshot_path" .= thSnapshotPath
+        ]
 
 instance FromJSON TraceHeader where
   parseJSON = withObject "TraceHeader" $ \o ->

@@ -33,7 +33,15 @@
 
           haskellPackages = pkgs.haskell.packages.${ghcVer};
           devUtils = with pkgs;
-            [ just zstd ] ++ (with haskellPackages; [
+            [
+              just
+              ruff
+              basedpyright
+              zstd
+              hyperfine
+              direnv
+              (python3.withPackages (ps: with ps; [ click matplotlib ]))
+            ] ++ (with haskellPackages; [
               fourmolu
               haskell-language-server
               ghcid

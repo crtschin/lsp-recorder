@@ -215,7 +215,8 @@ runReplay
         hSetBuffering serverOut NoBuffering
         startTime <- getCurrentTime
 
-        readerThread <- async $ readFramedMessages serverOut (handleServerMessage pendingRef origServerReqs idRemapRef)
+        readerThread <-
+          async $ readFramedMessages serverOut (handleServerMessage pendingRef origServerReqs idRemapRef)
 
         asyncHandles <-
           replayMessages
@@ -240,12 +241,13 @@ runReplay
         shutdownVar <- atomically newEmptyTMVar
         let makeFrame = encodeFrame . BL.toStrict . encode . Object . KM.fromList
             shutdownId = "lsp-recorder-shutdown"
-            shutdownFrame = makeFrame
-              [ ("jsonrpc", String "2.0")
-              , ("id", String shutdownId)
-              , ("method", String "shutdown")
-              , ("params", Null)
-              ]
+            shutdownFrame =
+              makeFrame
+                [ ("jsonrpc", String "2.0")
+                , ("id", String shutdownId)
+                , ("method", String "shutdown")
+                , ("params", Null)
+                ]
         atomically $ modifyTVar' pendingRef (Map.insert shutdownId ("shutdown", shutdownVar))
         BS.hPut serverIn shutdownFrame
         hPutStrLn stderr "[lsp-recorder] sent shutdown request"
