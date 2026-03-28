@@ -17,6 +17,8 @@ import System.Directory.OsPath
   )
 import System.FilePattern ((?==))
 import System.OsPath (OsPath, decodeFS, encodeFS, takeBaseName, takeDirectory, (</>))
+import qualified Codec.Compression.Zstd.Lazy as Zstd.Lazy
+import Control.Exception
 
 -- | Recursively walk @root@ and return relative paths of files that match at
 -- least one include glob and none of the exclude globs. Directories matching
@@ -75,7 +77,7 @@ restoreSnapshot archivePath targetDir = do
   targetDirStr <- decodeFS targetDir
   compressed <- BL.readFile archivePathStr
   tarBytes <- case Zstd.decompress (BL.toStrict compressed) of
-    Zstd.Skip -> fail "restoreSnapshot: zstd decompression returned Skip"
+    Zstd.Skip -> evaluate $ Zstd.Lazy.decompress compressed
     Zstd.Error msg -> fail $ "restoreSnapshot: zstd decompression error: " <> msg
     Zstd.Decompress bs -> pure (BL.fromStrict bs)
   Tar.unpack targetDirStr (Tar.read tarBytes)
