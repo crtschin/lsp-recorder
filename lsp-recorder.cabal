@@ -98,3 +98,4 @@ test-suite lsp-recorder-test
     , text
     , text-rope
     , time
+    , unix

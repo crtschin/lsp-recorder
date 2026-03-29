@@ -112,7 +112,6 @@ runRecord RecordConfig{rcServerCommand, rcTraceOut, rcProjectRoot, rcSnapshot} =
     bracket (IO.openFile traceOutStr WriteMode) hClose $ \traceHandle -> do
       hSetBuffering traceHandle (BlockBuffering Nothing)
       BC.hPutStrLn traceHandle (BL.toStrict $ encode header)
-
       logThread <- async $ runLoggingThread traceHandle queue serverInfoRef 0
 
       let proxyCfg =

@@ -8,6 +8,8 @@ module LspRecorder.Snapshot
 
 import Codec.Archive.Tar qualified as Tar
 import Codec.Compression.Zstd qualified as Zstd
+import Codec.Compression.Zstd.Lazy qualified as Zstd.Lazy
+import Control.Exception
 import Data.ByteString.Lazy qualified as BL
 import LspRecorder.Config (SnapshotConfig (..))
 import System.Directory.OsPath
@@ -17,8 +19,6 @@ import System.Directory.OsPath
   )
 import System.FilePattern ((?==))
 import System.OsPath (OsPath, decodeFS, encodeFS, takeBaseName, takeDirectory, (</>))
-import qualified Codec.Compression.Zstd.Lazy as Zstd.Lazy
-import Control.Exception
 
 -- | Recursively walk @root@ and return relative paths of files that match at
 -- least one include glob and none of the exclude globs. Directories matching

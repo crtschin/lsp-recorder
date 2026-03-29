@@ -59,14 +59,16 @@ def collect_all_data(input_dir: Path):
         # Wallclock (from hyperfine)
         hf = load_json(commit_dir / "hyperfine.json")
         result = hf["results"][0]
-        wallclock_rows.append({
-            "commit": commit,
-            "mean_s": result["mean"],
-            "stddev_s": result["stddev"],
-            "min_s": result["min"],
-            "max_s": result["max"],
-            "median_s": result["median"],
-        })
+        wallclock_rows.append(
+            {
+                "commit": commit,
+                "mean_s": result["mean"],
+                "stddev_s": result["stddev"],
+                "min_s": result["min"],
+                "max_s": result["max"],
+                "median_s": result["median"],
+            }
+        )
 
         # Load report files once for both methods and total_duration
         reports = load_report_files(commit_dir)
@@ -93,14 +95,16 @@ def collect_all_data(input_dir: Path):
                 method_data[method]["p99_ms"].append(stats.get("p99_ms", 0.0))
 
         for method, vals in sorted(method_data.items()):
-            methods_rows.append({
-                "commit": commit,
-                "method": method,
-                "count": statistics.mean(vals["count"]),
-                "p50_ms": statistics.mean(vals["p50_ms"]),
-                "p95_ms": statistics.mean(vals["p95_ms"]),
-                "p99_ms": statistics.mean(vals["p99_ms"]),
-            })
+            methods_rows.append(
+                {
+                    "commit": commit,
+                    "method": method,
+                    "count": statistics.mean(vals["count"]),
+                    "p50_ms": statistics.mean(vals["p50_ms"]),
+                    "p95_ms": statistics.mean(vals["p95_ms"]),
+                    "p99_ms": statistics.mean(vals["p99_ms"]),
+                }
+            )
 
         # Total duration
         durations = [
@@ -109,13 +113,15 @@ def collect_all_data(input_dir: Path):
         timed_outs = [float(r.get("timed_out_requests", False)) for r in reports]
 
         if durations:
-            total_duration_rows.append({
-                "commit": commit,
-                "mean_total_ms": statistics.mean(durations),
-                "min_total_ms": min(durations),
-                "max_total_ms": max(durations),
-                "timed_out_avg": statistics.mean(timed_outs),
-            })
+            total_duration_rows.append(
+                {
+                    "commit": commit,
+                    "mean_total_ms": statistics.mean(durations),
+                    "min_total_ms": min(durations),
+                    "max_total_ms": max(durations),
+                    "timed_out_avg": statistics.mean(timed_outs),
+                }
+            )
 
     return wallclock_rows, methods_rows, total_duration_rows
 
